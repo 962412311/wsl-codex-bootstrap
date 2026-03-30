@@ -62,7 +62,7 @@ function Confirm-ManualStep {
     param([Parameter(Mandatory)][string]$Action)
 
     if (-not (Confirm-Yes $Action)) {
-        throw 'Cancelled by user.'
+        throw '用户已取消。'
     }
 }
 
@@ -122,7 +122,7 @@ function Get-OsInfo {
 
 function Register-ResumeSelf {
     if ([string]::IsNullOrWhiteSpace($PSCommandPath)) {
-        Write-WarnEx 'Cannot register RunOnce because the script is not being run from a file path.'
+        Write-WarnEx '无法注册 RunOnce：脚本不是从文件路径运行的。'
         return
     }
 
@@ -138,7 +138,7 @@ function Register-ResumeSelf {
     if ($Distro -ne 'Ubuntu') { $cmd += " -Distro `"$Distro`"" }
 
     Set-ItemProperty -Path $runOncePath -Name 'InstallWslCodexResume' -Value $cmd -Force
-    Write-Ok 'Registered RunOnce resume entry.'
+    Write-Ok '已注册 RunOnce 恢复项。'
 }
 
 function Get-WslHelpText {
@@ -167,7 +167,7 @@ function Get-DistroVersionMap {
     $map = @{}
     if ($result.ExitCode -ne 0) { return $map }
     foreach ($line in $result.Output) {
-        $text = "$line".Trim()
+        $text = ("$line" -replace "`0", '').Trim()
         if (-not $text -or $text -match '^(NAME|Windows|\*)') { continue }
         $clean = $text.TrimStart('*').Trim()
         $parts = $clean -split '\s{2,}'
@@ -182,7 +182,7 @@ function Get-DefaultDistro {
     $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-l', '-v') -AllowFailure -CaptureOutput
     if ($result.ExitCode -ne 0) { return $null }
 
-    $text = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n")
+    $text = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n") -replace "`0", ''
     $match = [regex]::Match($text, '^\s*\*\s*(.+?)\s{2,}', [System.Text.RegularExpressions.RegexOptions]::Multiline)
     if ($match.Success) {
         return $match.Groups[1].Value.Trim()
@@ -225,21 +225,21 @@ function Ensure-DistroInstalled {
 
     $distros = Get-InstalledDistros
     if ($distros -contains $TargetDistro) {
-        Write-Ok "$TargetDistro is already installed."
+        Write-Ok "$TargetDistro 已经安装。"
         return
     }
 
-    Write-Section "Install WSL distro: $TargetDistro"
-    Write-Info 'This will run `wsl --install -d <Distro>` and usually requires a reboot.'
+    Write-Section "安装 WSL 发行版：$TargetDistro"
+    Write-Info '这会执行 `wsl --install -d <Distro>`，通常需要重启。'
     Confirm-ManualStep "是否现在安装 $TargetDistro 并继续？"
     Register-ResumeSelf
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--install', '-d', $TargetDistro)
-    Write-WarnEx 'WSL installation command has been issued. Reboot Windows now to continue.'
-    if (Confirm-Yes 'Reboot now?') {
+    Write-WarnEx '已发出 WSL 安装命令。请现在重启 Windows 继续。'
+    if (Confirm-Yes '是否现在重启？') {
         Restart-Computer -Force
     }
     else {
-        Write-WarnEx 'Please reboot manually and rerun the script.'
+        Write-WarnEx '请手动重启后重新运行脚本。'
     }
     exit 0
 }
@@ -276,22 +276,22 @@ function Invoke-WslBash {
 function Ensure-DistroInitialized {
     param([string]$TargetDistro)
 
-    Write-Section 'Check initial distro setup'
+    Write-Section '检查发行版初始设置'
     $probe = Invoke-WslBash -TargetDistro $TargetDistro -User 'root' -Command 'printf __WSL_READY__' -AllowFailure -CaptureOutput
     if ($probe.ExitCode -eq 0 -and (($probe.Output | Out-String) -match '__WSL_READY__')) {
-        Write-Ok "$TargetDistro is ready."
+        Write-Ok "$TargetDistro 已就绪。"
         return
     }
 
-    Write-WarnEx "The distro may still need first-time initialization."
-    Write-WarnEx 'An interactive WSL window will open. Finish Linux user creation, then type `exit` to return here.'
+    Write-WarnEx '该发行版可能还需要首次初始化。'
+    Write-WarnEx '稍后会打开一个交互式 WSL 窗口。请完成 Linux 用户创建后输入 `exit` 返回。'
     & wsl.exe -d $TargetDistro
 
     $probe2 = Invoke-WslBash -TargetDistro $TargetDistro -User 'root' -Command 'printf __WSL_READY__' -AllowFailure -CaptureOutput
     if ($probe2.ExitCode -ne 0 -or (($probe2.Output | Out-String) -notmatch '__WSL_READY__')) {
-        throw "The distro is still not initialized. Run `wsl -d $TargetDistro` manually and rerun this script."
+        throw "该发行版仍未完成初始化。请手动运行 `wsl -d $TargetDistro`，然后重新运行脚本。"
     }
-    Write-Ok "$TargetDistro first-time initialization completed."
+    Write-Ok "$TargetDistro 首次初始化已完成。"
 }
 
 function Get-DefaultLinuxUser {
@@ -299,7 +299,7 @@ function Get-DefaultLinuxUser {
 
     $result = Invoke-WslBash -TargetDistro $TargetDistro -Command 'id -un' -AllowFailure -CaptureOutput
     if ($result.ExitCode -ne 0) {
-        throw 'Unable to determine the default Linux user.'
+        throw '无法确定默认 Linux 用户。'
     }
     return (($result.Output | Select-Object -First 1).ToString().Trim())
 }
@@ -357,7 +357,7 @@ function Update-WslEngine {
 function Install-LinuxBasePackages {
     param([string]$TargetDistro)
 
-    Write-Section 'Install Linux base packages'
+    Write-Section '安装 Linux 基础包'
     $packages = @(
         'ca-certificates',
         'curl',
@@ -403,7 +403,7 @@ apt-get clean
     $upgradeCmd = if ($SkipAptUpgrade) { ':' } else { 'apt-get upgrade -y' }
     $rootScript = $rootScript.Replace('__UPGRADE_STEP__', $upgradeCmd).Replace('__PACKAGES__', ($packages -join ' '))
     Invoke-WslBash -TargetDistro $TargetDistro -User 'root' -Command $rootScript | Out-Null
-    Write-Ok 'Linux base packages installed.'
+    Write-Ok 'Linux 基础包已安装。'
 }
 
 function Install-NvmNodeAndCodex {
@@ -734,7 +734,7 @@ esac
 
     $result = Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript -CaptureOutput
     if ($result.ExitCode -ne 0) {
-        throw 'Failed to update Codex default model.'
+        throw '更新 Codex 默认模型失败。'
     }
 
     $statusText = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
@@ -757,7 +757,7 @@ function Check-CodexSubscriptionStatus {
         [string]$LinuxUser
     )
 
-    Write-Section "Check Codex subscription inside WSL for $LinuxUser"
+    Write-Section "检查 $LinuxUser 的 Codex 订阅状态"
 
     $userScript = @'
 set -euo pipefail
@@ -903,7 +903,7 @@ function Get-SkillManifest {
         return (Get-Content -Raw -Path $tempManifest | ConvertFrom-Json)
     }
 
-    throw 'Skill manifest source is not configured. Set skills-source.json or pass -SkillsManifestPath / -SkillsManifestUrl.'
+    throw '未配置技能清单来源。请设置 skills-source.json，或传入 -SkillsManifestPath / -SkillsManifestUrl。'
 }
 
 function ConvertTo-BashSingleQuoted {
@@ -937,7 +937,7 @@ function Install-CodexSkills {
     $manifest = Get-SkillManifest
     $skills = @($manifest.skills | Where-Object { $null -eq $_.enabled -or [bool]$_.enabled })
     if ($skills.Count -eq 0) {
-        Write-WarnEx 'Skill manifest is empty; skipping skill installation.'
+        Write-WarnEx '技能清单为空，跳过技能安装。'
         return
     }
 
@@ -945,7 +945,7 @@ function Install-CodexSkills {
     $sourceRoots = @{}
     foreach ($skill in $skills) {
         if ([string]::IsNullOrWhiteSpace($skill.name) -or [string]::IsNullOrWhiteSpace($skill.sourceId) -or [string]::IsNullOrWhiteSpace($skill.sourcePath)) {
-            throw 'Each skill manifest entry must include `name`, `sourceId`, and `sourcePath`.'
+            throw '每个技能清单条目都必须包含 `name`、`sourceId` 和 `sourcePath`。'
         }
 
         if (-not $sourceRoots.ContainsKey($skill.sourceId)) {
@@ -971,7 +971,11 @@ function Install-CodexSkills {
         $checkoutDir = "$tempRoot/$sourceId"
         $repo = ConvertTo-BashSingleQuoted ([string]$source.repo)
         $checkout = ConvertTo-BashSingleQuoted $checkoutDir
-        $branch = if ($null -ne $source.ref -and -not [string]::IsNullOrWhiteSpace([string]$source.ref)) { " --branch $(ConvertTo-BashSingleQuoted ([string]$source.ref))" } else { '' }
+        $refValue = $null
+        if ($source.PSObject.Properties.Match('ref').Count -gt 0) {
+            $refValue = [string]$source.ref
+        }
+        $branch = if (-not [string]::IsNullOrWhiteSpace($refValue)) { " --branch $(ConvertTo-BashSingleQuoted $refValue)" } else { '' }
         $bash.Add("rm -rf $checkout")
         $bash.Add("git clone --depth 1$branch $repo $checkout")
     }
@@ -994,7 +998,7 @@ function Install-CodexSkills {
     }
 
     $userScript = ($bash -join "`n")
-    Write-Section "为 $LinuxUser 安装 Codex skills"
+        Write-Section "为 $LinuxUser 安装 Codex skills"
     Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
     Write-Ok '已从上游仓库安装 Codex skills。'
 }
@@ -1009,41 +1013,41 @@ function Launch-CodexInteractive {
         return
     }
 
-    if (-not (Confirm-Yes 'Launch Codex now for first-time sign-in?')) {
+    if (-not (Confirm-Yes '是否现在启动 Codex 进行首次登录？')) {
         return
     }
 
     Check-CodexSubscriptionStatus -TargetDistro $TargetDistro -LinuxUser $LinuxUser
 
-    Write-Section 'Launch Codex'
-    Write-Info 'This will open WSL in ~/code and start `codex`.'
+    Write-Section '启动 Codex'
+    Write-Info '这会在 WSL 的 ~/code 目录中启动 `codex`。'
     & wsl.exe -d $TargetDistro -u $LinuxUser -- bash -lc 'cd ~/code && "$HOME/.local/bin/codex"'
 }
 
 try {
-    Write-Section 'Windows host checks'
+    Write-Section 'Windows 主机检查'
 
     if (-not $SkipHostChecks) {
         if (-not (Test-IsAdmin)) {
-            throw 'Run this script from an elevated PowerShell session.'
+            throw '请在提升权限的 PowerShell 会话中运行此脚本。'
         }
 
         $os = Get-OsInfo
-        Write-Info "Windows: $($os.ProductName) $($os.DisplayVersion) (Build $($os.CurrentBuild))"
+        Write-Info "Windows：$($os.ProductName) $($os.DisplayVersion)（Build $($os.CurrentBuild)）"
 
         if ($os.CurrentBuild -lt 19041) {
-            throw 'This Windows build is too old for a reliable WSL 2 bootstrap.'
+            throw '当前 Windows 版本过旧，无法可靠执行 WSL 2 引导。'
         }
 
         if (-not (Test-WslInstallSupported)) {
-            Write-WarnEx 'WSL install support could not be confirmed from the client help output. The script will still try the install path directly.'
+            Write-WarnEx '无法从客户端帮助输出确认 WSL 安装支持，脚本仍会直接尝试安装路径。'
         }
     }
     else {
-        Write-WarnEx 'Host checks are being skipped for validation-only execution.'
+        Write-WarnEx '当前跳过主机检查，仅用于验证执行。'
     }
 
-    Write-Section 'Prepare WSL'
+    Write-Section '准备 WSL'
     Update-WslEngine
     Ensure-DistroInstalled -TargetDistro $Distro
     Ensure-WslVersion2 -TargetDistro $Distro
@@ -1052,7 +1056,7 @@ try {
         Write-Ok "$Distro 已经是默认 WSL 发行版，跳过设置。"
     }
     elseif ($null -eq $currentDefaultDistro) {
-        Write-WarnEx '无法读取当前默认 WSL 发行版，将手动确认是否需要修改。'
+        Write-WarnEx '无法读取当前默认 WSL 发行版，改用手动确认。'
         if (Confirm-Yes "是否将 $Distro 设为默认 WSL 发行版？") {
             Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default', $Distro) -AllowFailure | Out-Null
             Write-Ok "$Distro 已设为默认 WSL 发行版。"
@@ -1071,11 +1075,11 @@ try {
     Ensure-DistroInitialized -TargetDistro $Distro
 
     $linuxUser = Get-DefaultLinuxUser -TargetDistro $Distro
-    Write-Info "Default Linux user: $linuxUser"
+    Write-Info "默认 Linux 用户：$linuxUser"
     if ($linuxUser -eq 'root') {
-        Write-WarnEx 'The default Linux user is root.'
-        if (-not (Confirm-Yes 'Continue installing in root?')) {
-            throw 'Cancelled.'
+        Write-WarnEx '默认 Linux 用户是 root。'
+        if (-not (Confirm-Yes '是否继续以 root 身份安装？')) {
+            throw '已取消。'
         }
     }
 
@@ -1086,11 +1090,11 @@ try {
     Check-CodexSubscriptionStatus -TargetDistro $Distro -LinuxUser $linuxUser
     Install-CodexSkills -TargetDistro $Distro -LinuxUser $linuxUser
 
-    Write-Section 'Installation complete'
-    Write-Ok 'WSL, the Linux distro, base tools, nvm, Node LTS, Codex, and packaged skills have been installed.'
-    Write-Info 'Keep your active projects inside the Linux filesystem when possible, e.g. ~/code/<project>.'
-    Write-Info "You can enter WSL later with: wsl -d $Distro"
-    Write-Info 'Inside WSL, run: codex'
+    Write-Section '安装完成'
+    Write-Ok 'WSL、Linux 发行版、基础工具、nvm、Node LTS、Codex 和打包技能已安装。'
+    Write-Info '尽量把当前项目放在 Linux 文件系统中，例如 `~/code/<project>`。'
+    Write-Info "之后可使用 `wsl -d $Distro` 进入 WSL。"
+    Write-Info '进入 WSL 后运行：`codex`'
 
     Launch-CodexInteractive -TargetDistro $Distro -LinuxUser $linuxUser
 }
