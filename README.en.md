@@ -7,7 +7,7 @@ This repository is the Windows-side bootstrapper for getting a fresh Windows mac
 Run it once and it installs WSL, Codex, and all 32 skills from the configured skills manifest.
 
 The script also writes Codex's default model as `gpt-5.4-mini`.
-After installation and before each automatic launch, it also checks inside WSL whether the Codex subscription is nearing expiry or already expired; it only warns and does not block.
+After installation and before each automatic launch, it also updates Codex to the latest version inside WSL and checks whether the subscription is nearing expiry or already expired; it only warns and does not block.
 
 It is responsible for:
 
@@ -39,17 +39,17 @@ If you want to pin a specific manifest source, edit `skills-source.json` first o
 4. Run:
 
 ```powershell
-.\install-wsl-codex.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1
 ```
 
 Optional flags:
 
 ```powershell
-.\install-wsl-codex.ps1 -Distro Ubuntu
-.\install-wsl-codex.ps1 -SkipAptUpgrade
-.\install-wsl-codex.ps1 -NoAutoLaunchCodex
-.\install-wsl-codex.ps1 -InstallBubblewrap
-.\install-wsl-codex.ps1 -SkillsManifestPath "..\Codex&WSL_all_in_one\skills.manifest.json"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -Distro Ubuntu
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -SkipAptUpgrade
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -NoAutoLaunchCodex
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -InstallBubblewrap
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -SkillsManifestPath "..\Codex&WSL_all_in_one\skills.manifest.json"
 ```
 
 ## Production Setup

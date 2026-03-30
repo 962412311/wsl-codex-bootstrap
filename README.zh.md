@@ -7,4 +7,16 @@
 运行一次，就会安装 WSL、Codex，以及配置清单里的全部 32 个 skills。
 
 脚本还会把 Codex 默认模型写成 `gpt-5.4-mini`。
-安装完成后和每次自动启动前，脚本还会在 WSL 里检查 Codex 订阅是否快到期或已到期，只提示，不阻断。
+安装完成后和每次自动启动前，脚本还会在 WSL 里直接更新 Codex 到最新版本，并检查订阅是否快到期或已到期，只提示，不阻断。
+
+在线一键执行请在 Windows PowerShell 或 Windows Terminal 里运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-wsl-codex.ps1' | iex"
+```
+
+本地执行也请用：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1
+```

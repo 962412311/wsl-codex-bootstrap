@@ -135,6 +135,16 @@ function Get-WslHelpText {
     return ($result.Output | Out-String)
 }
 
+function Test-WslInstallSupported {
+    try {
+        $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--install', '--help') -AllowFailure -CaptureOutput
+        return ($result.ExitCode -eq 0 -or (($result.Output | Out-String) -match '--install'))
+    }
+    catch {
+        return $false
+    }
+}
+
 function Get-InstalledDistros {
     $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-l', '-q') -AllowFailure -CaptureOutput
     if ($result.ExitCode -ne 0) { return @() }
@@ -309,9 +319,10 @@ function Install-NvmNodeAndCodex {
 
     Write-Section "Install nvm / Node LTS / Codex for $LinuxUser"
 
-    $userScript = @'
+$userScript = @'
 set -euo pipefail
-mkdir -p "$HOME/.local/bin" "$HOME/code"
+codex_prefix="$HOME/.codex/npm-global"
+mkdir -p "$HOME/.local/bin" "$HOME/code" "$codex_prefix"
 
 if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
   curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
@@ -319,6 +330,7 @@ fi
 
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+export PATH="$codex_prefix/bin:$HOME/.local/bin:$PATH"
 
 if ! grep -q '### codex-wsl-bootstrap ###' "$HOME/.bashrc" 2>/dev/null; then
   cat >> "$HOME/.bashrc" <<'EOF_BASHRC'
@@ -326,6 +338,7 @@ if ! grep -q '### codex-wsl-bootstrap ###' "$HOME/.bashrc" 2>/dev/null; then
 ### codex-wsl-bootstrap ###
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+export PATH="$HOME/.codex/npm-global/bin:$HOME/.local/bin:$PATH"
 if printf '%s' "$PATH" | grep -Eq '/mnt/c/Users/[^/]+/AppData/Roaming/npm'; then
   PATH="$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: '$0 !~ /\/mnt\/c\/Users\/[^/]+\/AppData\/Roaming\/npm/ {print}' | sed 's/:$//')"
   export PATH
@@ -342,15 +355,150 @@ fi
 nvm install --lts
 nvm alias default 'lts/*'
 nvm use --lts
-npm i -g @openai/codex@latest
+npm i -g --prefix "$codex_prefix" @openai/codex@latest
+codex_bin="$codex_prefix/bin/codex"
 
 echo "Node version: $(node -v)"
 echo "npm version : $(npm -v)"
-echo "codex version: $(codex --version)"
+echo "codex version: $("$codex_bin" --version)"
 '@
 
     Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
     Write-Ok 'nvm, Node, and Codex installed.'
+}
+
+function Install-CodexAutoUpdateWrapper {
+    param(
+        [string]$TargetDistro,
+        [string]$LinuxUser
+    )
+
+    Write-Section "Install Codex auto-update wrapper for $LinuxUser"
+
+$userScript = @'
+set -euo pipefail
+mkdir -p "$HOME/.local/bin"
+cat > "$HOME/.local/bin/codex" <<'EOF_WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+
+codex_prefix="$HOME/.codex/npm-global"
+real_codex="$codex_prefix/bin/codex"
+
+check_subscription() {
+  python3 - <<'PY'
+import base64
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+auth_path = Path.home() / '.codex' / 'auth.json'
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+def info(message):
+    print(f'[INFO] {message}')
+
+if not auth_path.exists():
+    warn('Codex auth file not found; skipping subscription check.')
+    sys.exit(0)
+
+try:
+    auth = json.loads(auth_path.read_text())
+except Exception as exc:
+    warn(f'Unable to read Codex auth file: {exc}')
+    sys.exit(0)
+
+if auth.get('auth_mode') != 'chatgpt':
+    info('Codex is not logged in with ChatGPT; skipping subscription check.')
+    sys.exit(0)
+
+tokens = auth.get('tokens') or {}
+
+def decode_jwt(token):
+    parts = token.split('.')
+    if len(parts) < 2:
+        return {}
+    payload = parts[1] + '=' * (-len(parts[1]) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload.encode('ascii')))
+
+def extract_subscription(payload):
+    nested = payload.get('https://api.openai.com/auth')
+    if isinstance(nested, dict):
+        value = nested.get('chatgpt_subscription_active_until')
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+subscription_until = None
+for token_name in ('id_token', 'access_token'):
+    token = tokens.get(token_name)
+    if not isinstance(token, str) or not token.strip():
+        continue
+    try:
+        payload = decode_jwt(token)
+    except Exception:
+        continue
+    subscription_until = extract_subscription(payload)
+    if subscription_until:
+        break
+
+if not subscription_until:
+    warn('Subscription expiry metadata was not found; skipping subscription check.')
+    sys.exit(0)
+
+normalized_until = subscription_until.replace('Z', '+00:00')
+try:
+    expiry = datetime.fromisoformat(normalized_until)
+except ValueError:
+    warn(f'Unable to parse subscription expiry time: {subscription_until}')
+    sys.exit(0)
+
+now = datetime.now(timezone.utc)
+remaining = expiry - now
+remaining_days = remaining.total_seconds() / 86400
+expiry_text = expiry.astimezone(timezone.utc).isoformat()
+
+if remaining.total_seconds() <= 0:
+    warn(f'Codex subscription appears expired at {expiry_text}.')
+    sys.exit(0)
+
+if remaining_days <= 7:
+    warn(f'Codex subscription expires soon: {expiry_text} ({remaining_days:.1f} days remaining).')
+    sys.exit(0)
+
+info(f'Codex subscription is active until {expiry_text} ({remaining_days:.1f} days remaining).')
+PY
+}
+
+update_codex() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo '[WARN] npm not found; skipping Codex update.'
+    return 0
+  fi
+
+  echo '[INFO] Updating Codex to the latest version.'
+  mkdir -p "$codex_prefix"
+  if ! npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
+    echo '[WARN] Codex update failed; continuing with the installed version.'
+  fi
+}
+
+check_subscription
+update_codex
+if [ ! -x "$real_codex" ] && [ -x "/usr/local/bin/codex" ]; then
+  real_codex="/usr/local/bin/codex"
+fi
+
+exec "$real_codex" "$@"
+EOF_WRAPPER
+chmod +x "$HOME/.local/bin/codex"
+'@
+
+    Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
+    Write-Ok 'Codex auto-update wrapper installed.'
 }
 
 function Ensure-CodexDefaultModel {
@@ -677,7 +825,7 @@ function Launch-CodexInteractive {
 
     Write-Section 'Launch Codex'
     Write-Info 'This will open WSL in ~/code and start `codex`.'
-    & wsl.exe -d $TargetDistro -u $LinuxUser -- bash -lc 'cd ~/code && codex'
+    & wsl.exe -d $TargetDistro -u $LinuxUser -- bash -lc 'cd ~/code && "$HOME/.local/bin/codex"'
 }
 
 try {
@@ -695,9 +843,8 @@ try {
             throw 'This Windows build is too old for a reliable WSL 2 bootstrap.'
         }
 
-        $wslHelp = Get-WslHelpText
-        if ($wslHelp -notmatch '--install') {
-            throw 'This system WSL client does not support `wsl --install`.'
+        if (-not (Test-WslInstallSupported)) {
+            Write-WarnEx 'WSL install support could not be confirmed from the client help output. The script will still try the install path directly.'
         }
     }
     else {
@@ -722,6 +869,7 @@ try {
 
     Install-LinuxBasePackages -TargetDistro $Distro
     Install-NvmNodeAndCodex -TargetDistro $Distro -LinuxUser $linuxUser
+    Install-CodexAutoUpdateWrapper -TargetDistro $Distro -LinuxUser $linuxUser
     Ensure-CodexDefaultModel -TargetDistro $Distro -LinuxUser $linuxUser
     Check-CodexSubscriptionStatus -TargetDistro $Distro -LinuxUser $linuxUser
     Install-CodexSkills -TargetDistro $Distro -LinuxUser $linuxUser
