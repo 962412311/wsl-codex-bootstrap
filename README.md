@@ -15,11 +15,13 @@ It is responsible for:
 
 ### Online one-liner
 
-Run the latest bootstrap script directly from GitHub:
+Run this in **Windows PowerShell or Windows Terminal on the Windows host**, preferably as Administrator:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-wsl-codex.ps1' | iex"
 ```
+
+Do not run this inside WSL.
 
 If you want to pin a specific manifest source, edit `skills-source.json` first or pass `-SkillsManifestUrl` / `-SkillsManifestPath` after downloading the script locally.
 

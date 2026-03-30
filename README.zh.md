@@ -15,11 +15,13 @@
 
 ### 在线一键执行
 
-直接从 GitHub 运行最新的 bootstrap 脚本：
+请在**Windows 主机上的 PowerShell 或 Windows Terminal**里运行，最好用管理员权限：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-wsl-codex.ps1' | iex"
 ```
+
+不要在 WSL 里面运行这条命令。
 
 如果你想固定使用某个 manifest 源，先修改 `skills-source.json`，或者把脚本下载到本地后再传 `-SkillsManifestUrl` / `-SkillsManifestPath`。
 
