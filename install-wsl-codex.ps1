@@ -175,6 +175,35 @@ function Get-DistroVersionMap {
     return $map
 }
 
+function Test-Wsl2Prerequisites {
+    $reasons = @()
+
+    try {
+        $feature = Get-WindowsOptionalFeature -Online -FeatureName 'VirtualMachinePlatform' -ErrorAction Stop
+        if ($feature.State -ne 'Enabled') {
+            $reasons += 'Virtual Machine Platform 未启用'
+        }
+    }
+    catch {
+        $reasons += '无法读取 Virtual Machine Platform 状态'
+    }
+
+    try {
+        $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        if ($null -ne $cpu -and $null -ne $cpu.VirtualizationFirmwareEnabled -and -not $cpu.VirtualizationFirmwareEnabled) {
+            $reasons += 'BIOS/UEFI 虚拟化未开启'
+        }
+    }
+    catch {
+        # If the firmware check is unavailable, keep the feature-state result.
+    }
+
+    [pscustomobject]@{
+        Ready   = ($reasons.Count -eq 0)
+        Reasons = $reasons
+    }
+}
+
 function Ensure-DistroInstalled {
     param([string]$TargetDistro)
 
@@ -262,7 +291,14 @@ function Get-DefaultLinuxUser {
 function Ensure-WslVersion2 {
     param([string]$TargetDistro)
 
-    Write-Section 'Ensure WSL 2'
+    Write-Section '确保 WSL 2'
+    $prereq = Test-Wsl2Prerequisites
+    if (-not $prereq.Ready) {
+        Write-WarnEx "$TargetDistro 暂不切换到 WSL 2：$($prereq.Reasons -join '；')"
+        Write-WarnEx '已继续后续安装流程。若需要 WSL 2，请先启用相关 Windows 功能后重试。'
+        return
+    }
+
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default-version', '2') -AllowFailure | Out-Null
     $map = Get-DistroVersionMap
     if ($map.ContainsKey($TargetDistro) -and $map[$TargetDistro] -eq '2') {
@@ -272,28 +308,26 @@ function Ensure-WslVersion2 {
 
     Write-Info "正在将 $TargetDistro 切换到 WSL 2..."
     $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-version', $TargetDistro, '2') -AllowFailure -CaptureOutput
-    foreach ($line in @($result.Output)) {
-        if ($null -ne $line -and -not [string]::IsNullOrWhiteSpace($line.ToString())) {
-            Write-Host $line
-        }
-    }
     if ($result.ExitCode -eq 0) {
         Write-Ok "$TargetDistro 已切换到 WSL 2。"
+        return
     }
-    else {
-        Write-WarnEx "$TargetDistro 切换到 WSL 2 失败。"
+
+    $outputText = ($result.Output | ForEach-Object { $_.ToString() }) -join "`n"
+    if ($outputText -match 'WSL_E_VM_MODE_INVALID_STATE|VM mode invalid state') {
+        Write-WarnEx "$TargetDistro 暂不支持切换到 WSL 2：当前虚拟化环境未就绪。"
+        Write-WarnEx '请先在 BIOS/UEFI 中开启虚拟化，并在 Windows 中启用 Virtual Machine Platform 后重试。'
+        return
     }
+
+    Write-WarnEx "$TargetDistro 切换到 WSL 2 失败。"
+    Write-WarnEx '请确认 Windows 已启用虚拟化，并重启后再试。'
 }
 
 function Update-WslEngine {
-    Write-Section 'Update WSL engine'
+    Write-Section '更新 WSL 引擎'
     Write-Info '正在检查并更新 WSL 引擎...'
     $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure -CaptureOutput
-    foreach ($line in @($result.Output)) {
-        if ($null -ne $line -and -not [string]::IsNullOrWhiteSpace($line.ToString())) {
-            Write-Host $line
-        }
-    }
     if ($result.ExitCode -eq 0) {
         Write-Ok 'WSL 引擎更新完成。'
     }
@@ -305,7 +339,6 @@ function Update-WslEngine {
 }
 
 function Install-LinuxBasePackages {
-
     param([string]$TargetDistro)
 
     Write-Section 'Install Linux base packages'
