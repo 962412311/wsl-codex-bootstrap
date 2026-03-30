@@ -380,7 +380,7 @@ desired_effort = 'medium'
 text = config_path.read_text() if config_path.exists() else ''
 lines = text.splitlines()
 
-def replace_or_prepend(key: str, value: str, lines: list[str]) -> list[str]:
+def replace_or_prepend(key, value, lines):
     pattern = re.compile(rf'^\s*{re.escape(key)}\s*=')
     updated = []
     replaced = False
@@ -408,6 +408,118 @@ echo "Default model: gpt-5.4-mini"
 
     Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
     Write-Ok 'Codex default model set to gpt-5.4-mini.'
+}
+
+function Check-CodexSubscriptionStatus {
+    param(
+        [string]$TargetDistro,
+        [string]$LinuxUser
+    )
+
+    Write-Section "Check Codex subscription for $LinuxUser"
+
+    $userScript = @'
+set -euo pipefail
+python3 - <<'PY'
+import base64
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+auth_path = Path.home() / '.codex' / 'auth.json'
+
+def warn(message: str) -> None:
+    print(f'[WARN] {message}')
+
+def info(message: str) -> None:
+    print(f'[INFO] {message}')
+
+if not auth_path.exists():
+    warn('Codex auth file not found; skipping subscription check.')
+    sys.exit(0)
+
+try:
+    auth = json.loads(auth_path.read_text())
+except Exception as exc:
+    warn(f'Unable to read Codex auth file: {exc}')
+    sys.exit(0)
+
+if auth.get('auth_mode') != 'chatgpt':
+    info('Codex is not logged in with ChatGPT; skipping subscription check.')
+    sys.exit(0)
+
+tokens = auth.get('tokens') or {}
+
+def decode_jwt(token: str) -> dict:
+    parts = token.split('.')
+    if len(parts) < 2:
+        return {}
+    payload = parts[1] + '=' * (-len(parts[1]) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload.encode('ascii')))
+
+def extract_subscription(payload):
+    nested = payload.get('https://api.openai.com/auth')
+    if isinstance(nested, dict):
+        value = nested.get('chatgpt_subscription_active_until')
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+subscription_until = None
+for token_name in ('id_token', 'access_token'):
+    token = tokens.get(token_name)
+    if not isinstance(token, str) or not token.strip():
+        continue
+    try:
+        payload = decode_jwt(token)
+    except Exception:
+        continue
+    subscription_until = extract_subscription(payload)
+    if subscription_until:
+        break
+
+if not subscription_until:
+    warn('Subscription expiry metadata was not found; skipping subscription check.')
+    sys.exit(0)
+
+normalized_until = subscription_until.replace('Z', '+00:00')
+try:
+    expiry = datetime.fromisoformat(normalized_until)
+except ValueError:
+    warn(f'Unable to parse subscription expiry time: {subscription_until}')
+    sys.exit(0)
+
+now = datetime.now(timezone.utc)
+remaining = expiry - now
+remaining_days = remaining.total_seconds() / 86400
+
+if remaining.total_seconds() <= 0:
+    warn(f'Codex subscription appears expired at {expiry.astimezone(timezone.utc).isoformat()}.')
+    sys.exit(0)
+
+if remaining_days <= 7:
+    warn(
+        'Codex subscription expires soon: '
+        f'{expiry.astimezone(timezone.utc).isoformat()} '
+        f'({remaining_days:.1f} days remaining).'
+    )
+    sys.exit(0)
+
+info(
+    'Codex subscription is active until '
+    f'{expiry.astimezone(timezone.utc).isoformat()} '
+    f'({remaining_days:.1f} days remaining).'
+)
+PY
+'@
+
+    $result = Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript -CaptureOutput
+    foreach ($line in @($result.Output)) {
+        if ($null -ne $line -and -not [string]::IsNullOrWhiteSpace($line.ToString())) {
+            Write-Host $line
+        }
+    }
 }
 
 function Get-SkillManifest {
@@ -561,6 +673,8 @@ function Launch-CodexInteractive {
         return
     }
 
+    Check-CodexSubscriptionStatus -TargetDistro $TargetDistro -LinuxUser $LinuxUser
+
     Write-Section 'Launch Codex'
     Write-Info 'This will open WSL in ~/code and start `codex`.'
     & wsl.exe -d $TargetDistro -u $LinuxUser -- bash -lc 'cd ~/code && codex'
@@ -609,6 +723,7 @@ try {
     Install-LinuxBasePackages -TargetDistro $Distro
     Install-NvmNodeAndCodex -TargetDistro $Distro -LinuxUser $linuxUser
     Ensure-CodexDefaultModel -TargetDistro $Distro -LinuxUser $linuxUser
+    Check-CodexSubscriptionStatus -TargetDistro $Distro -LinuxUser $linuxUser
     Install-CodexSkills -TargetDistro $Distro -LinuxUser $linuxUser
 
     Write-Section 'Installation complete'
