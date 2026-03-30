@@ -4,6 +4,8 @@
 
 这是给新 Windows 机器使用的 Codex 一键引导仓库。
 
+运行一次，就会安装 WSL、Codex，以及配置清单里的全部 32 个 skills。
+
 它负责：
 
 - 启用并更新 WSL

@@ -4,6 +4,8 @@
 
 This repository is the Windows-side bootstrapper for getting a fresh Windows machine ready for Codex.
 
+Run it once and it installs WSL, Codex, and all 32 skills from the configured skills manifest.
+
 It is responsible for:
 
 - enabling and updating WSL
