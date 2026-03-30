@@ -419,11 +419,12 @@ function Install-NvmNodeAndCodex {
 
     Write-Section "为 $LinuxUser 安装 nvm / Node.js LTS / Codex"
 
-    $userScript = @'
+$userScript = @'
 set -euo pipefail
 codex_prefix="$HOME/.codex/npm-global"
 mkdir -p "$HOME/.local/bin" "$HOME/code" "$codex_prefix"
 
+set +u
 if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
   curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
 fi
@@ -455,6 +456,7 @@ fi
 nvm install --lts
 nvm alias default 'lts/*'
 nvm use --lts
+set -u
 npm i -g --prefix "$codex_prefix" @openai/codex@latest
 codex_bin="$codex_prefix/bin/codex"
 
@@ -484,6 +486,7 @@ set -euo pipefail
 
 codex_prefix="$HOME/.codex/npm-global"
 real_codex="$codex_prefix/bin/codex"
+update_stamp="$HOME/.codex/.codex-update-check.date"
 
 check_subscription() {
   python3 - <<'PY'
@@ -573,9 +576,30 @@ info(f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：{expiry_text
 PY
 }
 
+touch_update_stamp() {
+  mkdir -p "$HOME/.codex"
+  date +%F > "$update_stamp"
+}
+
+should_check_update() {
+  local today current
+  today="$(date +%F)"
+  current="$(cat "$update_stamp" 2>/dev/null || true)"
+  if [ "$current" = "$today" ]; then
+    echo '[INFO] 今天已检查过 Codex 更新，跳过。'
+    return 1
+  fi
+  return 0
+}
+
 update_codex() {
   if ! command -v npm >/dev/null 2>&1; then
     echo '[WARN] 未找到 npm，跳过 Codex 更新。'
+    touch_update_stamp
+    return 0
+  fi
+
+  if ! should_check_update; then
     return 0
   fi
 
@@ -587,6 +611,7 @@ update_codex() {
     else
       echo '[WARN] Codex 安装失败，将继续使用当前版本。'
     fi
+    touch_update_stamp
     return 0
   fi
 
@@ -595,11 +620,13 @@ update_codex() {
 
   if [ -z "$latest_version" ]; then
     echo '[WARN] 无法获取 Codex 最新版本，跳过自动更新。'
+    touch_update_stamp
     return 0
   fi
 
   if [ "$current_version" = "$latest_version" ]; then
     echo "[INFO] Codex 已是最新版本：$current_version。"
+    touch_update_stamp
     return 0
   fi
 
@@ -610,6 +637,7 @@ update_codex() {
   else
     echo '[WARN] Codex 更新失败，将继续使用当前版本。'
   fi
+  touch_update_stamp
 }
 
 check_subscription
@@ -640,7 +668,7 @@ set -euo pipefail
 mkdir -p "$HOME/.codex"
 config="$HOME/.codex/config.toml"
 tmp="$(mktemp)"
-
+status="$(
 python3 - "$config" "$tmp" <<'PY'
 import re
 import sys
@@ -653,6 +681,21 @@ desired_effort = 'medium'
 
 text = config_path.read_text() if config_path.exists() else ''
 lines = text.splitlines()
+
+def get_value(key):
+    pattern = re.compile(rf'^\s*{re.escape(key)}\s*=\s*"([^"]*)"')
+    for line in lines:
+        match = pattern.match(line)
+        if match:
+            return match.group(1)
+    return None
+
+current_model = get_value('model')
+current_effort = get_value('model_reasoning_effort')
+
+if current_model == desired_model and current_effort == desired_effort:
+    print('UNCHANGED')
+    sys.exit(0)
 
 def replace_or_prepend(key, value, lines):
     pattern = re.compile(rf'^\s*{re.escape(key)}\s*=')
@@ -673,15 +716,44 @@ lines = replace_or_prepend('model', desired_model, lines)
 lines = replace_or_prepend('model_reasoning_effort', desired_effort, lines)
 
 tmp_path.write_text('\n'.join(lines).rstrip() + '\n')
+print('UPDATED')
 PY
+' )"
 
-mv "$tmp" "$config"
-echo "Codex config written: $config"
-echo "Default model: gpt-5.4-mini"
+case "$status" in
+    UNCHANGED)
+        echo 'UNCHANGED'
+        rm -f "$tmp"
+        ;;
+    UPDATED)
+        mv "$tmp" "$config"
+        echo 'UPDATED'
+        ;;
+    *)
+        rm -f "$tmp"
+        echo "ERROR: $status"
+        exit 1
+        ;;
+esac
 '@
 
-    Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
-    Write-Ok '已将 Codex 默认模型设为 gpt-5.4-mini。'
+    $result = Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript -CaptureOutput
+    if ($result.ExitCode -ne 0) {
+        throw 'Failed to update Codex default model.'
+    }
+
+    $statusText = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
+    if ($statusText -eq 'UNCHANGED') {
+        Write-Ok 'Codex 默认模型已是 gpt-5.4-mini，跳过写入。'
+        return
+    }
+
+    if ($statusText -eq 'UPDATED') {
+        Write-Ok '已将 Codex 默认模型设为 gpt-5.4-mini。'
+        return
+    }
+
+    Write-Ok '已检查 Codex 默认模型。'
 }
 
 function Check-CodexSubscriptionStatus {
