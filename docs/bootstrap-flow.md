@@ -6,7 +6,7 @@
 4. Ensure the distro is initialized and using WSL 2.
 5. Install base Linux tooling.
 6. Install `nvm`, Node.js LTS, and `@openai/codex`.
-7. Check the local Codex subscription expiry metadata and warn if it is near expiry or already expired.
+7. Check the local Codex subscription expiry metadata inside WSL and warn if it is near expiry or already expired.
 8. Read the external skills manifest from `skills-source.json`, clone upstream repositories, and install the listed skills.
 9. Optionally launch `codex` for first-time login.
 

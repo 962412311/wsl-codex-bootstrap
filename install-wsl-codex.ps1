@@ -416,7 +416,7 @@ function Check-CodexSubscriptionStatus {
         [string]$LinuxUser
     )
 
-    Write-Section "Check Codex subscription for $LinuxUser"
+    Write-Section "Check Codex subscription inside WSL for $LinuxUser"
 
     $userScript = @'
 set -euo pipefail
