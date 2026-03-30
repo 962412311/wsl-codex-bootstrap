@@ -201,12 +201,22 @@ function Invoke-WslBash {
         [switch]$CaptureOutput
     )
 
-    $args = @('-d', $TargetDistro)
-    if ($User) {
-        $args += @('-u', $User)
+    $tempScript = New-TemporaryFile
+    try {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($tempScript.FullName, $Command, $utf8NoBom)
+        $tempScriptPath = Convert-ToWslPath -WindowsPath $tempScript.FullName
+
+        $args = @('-d', $TargetDistro)
+        if ($User) {
+            $args += @('-u', $User)
+        }
+        $args += @('--', 'bash', $tempScriptPath)
+        return Invoke-External -FilePath 'wsl.exe' -ArgumentList $args -AllowFailure:$AllowFailure -CaptureOutput:$CaptureOutput
     }
-    $args += @('--', 'bash', '-lc', $Command)
-    return Invoke-External -FilePath 'wsl.exe' -ArgumentList $args -AllowFailure:$AllowFailure -CaptureOutput:$CaptureOutput
+    finally {
+        Remove-Item -LiteralPath $tempScript.FullName -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Ensure-DistroInitialized {
@@ -319,7 +329,7 @@ function Install-NvmNodeAndCodex {
 
     Write-Section "Install nvm / Node LTS / Codex for $LinuxUser"
 
-$userScript = @'
+    $userScript = @'
 set -euo pipefail
 codex_prefix="$HOME/.codex/npm-global"
 mkdir -p "$HOME/.local/bin" "$HOME/code" "$codex_prefix"
@@ -375,7 +385,7 @@ function Install-CodexAutoUpdateWrapper {
 
     Write-Section "Install Codex auto-update wrapper for $LinuxUser"
 
-$userScript = @'
+    $userScript = @'
 set -euo pipefail
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/codex" <<'EOF_WRAPPER'
@@ -402,17 +412,17 @@ def info(message):
     print(f'[INFO] {message}')
 
 if not auth_path.exists():
-    warn('Codex auth file not found; skipping subscription check.')
+    warn('未找到 Codex 登录信息，跳过订阅检查。')
     sys.exit(0)
 
 try:
     auth = json.loads(auth_path.read_text())
 except Exception as exc:
-    warn(f'Unable to read Codex auth file: {exc}')
+    warn(f'无法读取 Codex 登录信息：{exc}')
     sys.exit(0)
 
 if auth.get('auth_mode') != 'chatgpt':
-    info('Codex is not logged in with ChatGPT; skipping subscription check.')
+    info('当前不是 ChatGPT 登录，跳过订阅检查。')
     sys.exit(0)
 
 tokens = auth.get('tokens') or {}
@@ -446,14 +456,14 @@ for token_name in ('id_token', 'access_token'):
         break
 
 if not subscription_until:
-    warn('Subscription expiry metadata was not found; skipping subscription check.')
+    warn('未找到订阅到期时间，跳过检查。')
     sys.exit(0)
 
 normalized_until = subscription_until.replace('Z', '+00:00')
 try:
     expiry = datetime.fromisoformat(normalized_until)
 except ValueError:
-    warn(f'Unable to parse subscription expiry time: {subscription_until}')
+    warn(f'无法解析订阅到期时间：{subscription_until}')
     sys.exit(0)
 
 now = datetime.now(timezone.utc)
@@ -462,14 +472,14 @@ remaining_days = remaining.total_seconds() / 86400
 expiry_text = expiry.astimezone(timezone.utc).isoformat()
 
 if remaining.total_seconds() <= 0:
-    warn(f'Codex subscription appears expired at {expiry_text}.')
+    warn(f'Codex 订阅已过期，到期时间：{expiry_text}。')
     sys.exit(0)
 
 if remaining_days <= 7:
-    warn(f'Codex subscription expires soon: {expiry_text} ({remaining_days:.1f} days remaining).')
+    warn(f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：{expiry_text}。')
     sys.exit(0)
 
-info(f'Codex subscription is active until {expiry_text} ({remaining_days:.1f} days remaining).')
+info(f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：{expiry_text}。')
 PY
 }
 
@@ -584,17 +594,17 @@ def info(message: str) -> None:
     print(f'[INFO] {message}')
 
 if not auth_path.exists():
-    warn('Codex auth file not found; skipping subscription check.')
+    warn('未找到 Codex 登录信息，跳过订阅检查。')
     sys.exit(0)
 
 try:
     auth = json.loads(auth_path.read_text())
 except Exception as exc:
-    warn(f'Unable to read Codex auth file: {exc}')
+    warn(f'无法读取 Codex 登录信息：{exc}')
     sys.exit(0)
 
 if auth.get('auth_mode') != 'chatgpt':
-    info('Codex is not logged in with ChatGPT; skipping subscription check.')
+    info('当前不是 ChatGPT 登录，跳过订阅检查。')
     sys.exit(0)
 
 tokens = auth.get('tokens') or {}
@@ -628,14 +638,14 @@ for token_name in ('id_token', 'access_token'):
         break
 
 if not subscription_until:
-    warn('Subscription expiry metadata was not found; skipping subscription check.')
+    warn('未找到订阅到期时间，跳过检查。')
     sys.exit(0)
 
 normalized_until = subscription_until.replace('Z', '+00:00')
 try:
     expiry = datetime.fromisoformat(normalized_until)
 except ValueError:
-    warn(f'Unable to parse subscription expiry time: {subscription_until}')
+    warn(f'无法解析订阅到期时间：{subscription_until}')
     sys.exit(0)
 
 now = datetime.now(timezone.utc)
@@ -643,21 +653,19 @@ remaining = expiry - now
 remaining_days = remaining.total_seconds() / 86400
 
 if remaining.total_seconds() <= 0:
-    warn(f'Codex subscription appears expired at {expiry.astimezone(timezone.utc).isoformat()}.')
+    warn(f'Codex 订阅已过期，到期时间：{expiry.astimezone(timezone.utc).isoformat()}。')
     sys.exit(0)
 
 if remaining_days <= 7:
     warn(
-        'Codex subscription expires soon: '
-        f'{expiry.astimezone(timezone.utc).isoformat()} '
-        f'({remaining_days:.1f} days remaining).'
+        f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：'
+        f'{expiry.astimezone(timezone.utc).isoformat()}。'
     )
     sys.exit(0)
 
 info(
-    'Codex subscription is active until '
-    f'{expiry.astimezone(timezone.utc).isoformat()} '
-    f'({remaining_days:.1f} days remaining).'
+    f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：'
+    f'{expiry.astimezone(timezone.utc).isoformat()}。'
 )
 PY
 '@
