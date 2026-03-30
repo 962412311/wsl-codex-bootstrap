@@ -263,26 +263,49 @@ function Ensure-WslVersion2 {
     param([string]$TargetDistro)
 
     Write-Section 'Ensure WSL 2'
-    Confirm-ManualStep '是否现在更新 WSL 引擎并准备 WSL 2？'
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default-version', '2') -AllowFailure | Out-Null
     $map = Get-DistroVersionMap
-    if ($map.ContainsKey($TargetDistro) -and $map[$TargetDistro] -ne '2') {
-        Write-Info "Switching $TargetDistro to WSL 2..."
-        Confirm-ManualStep "是否将 $TargetDistro 切换到 WSL 2？"
-        Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-version', $TargetDistro, '2')
+    if ($map.ContainsKey($TargetDistro) -and $map[$TargetDistro] -eq '2') {
+        Write-Ok "$TargetDistro 已经是 WSL 2，跳过切换。"
+        return
     }
-    Write-Ok "$TargetDistro is configured as WSL 2."
+
+    Write-Info "正在将 $TargetDistro 切换到 WSL 2..."
+    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-version', $TargetDistro, '2') -AllowFailure -CaptureOutput
+    foreach ($line in @($result.Output)) {
+        if ($null -ne $line -and -not [string]::IsNullOrWhiteSpace($line.ToString())) {
+            Write-Host $line
+        }
+    }
+    if ($result.ExitCode -eq 0) {
+        Write-Ok "$TargetDistro 已切换到 WSL 2。"
+    }
+    else {
+        Write-WarnEx "$TargetDistro 切换到 WSL 2 失败。"
+    }
 }
 
 function Update-WslEngine {
     Write-Section 'Update WSL engine'
-    Confirm-ManualStep '是否更新 WSL 引擎并重启 WSL？'
-    Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure | Out-Null
+    Write-Info '正在检查并更新 WSL 引擎...'
+    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure -CaptureOutput
+    foreach ($line in @($result.Output)) {
+        if ($null -ne $line -and -not [string]::IsNullOrWhiteSpace($line.ToString())) {
+            Write-Host $line
+        }
+    }
+    if ($result.ExitCode -eq 0) {
+        Write-Ok 'WSL 引擎更新完成。'
+    }
+    else {
+        Write-WarnEx 'WSL 引擎更新失败或当前无需更新。'
+    }
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--shutdown') -AllowFailure | Out-Null
-    Write-Ok 'WSL engine updated and restarted.'
+    Write-Ok 'WSL 已重启。'
 }
 
 function Install-LinuxBasePackages {
+
     param([string]$TargetDistro)
 
     Write-Section 'Install Linux base packages'
