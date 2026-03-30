@@ -1,5 +1,7 @@
 # WSL Codex Bootstrap
 
+[English](./README.md) | [简体中文](./README.zh.md)
+
 This repository is the Windows-side bootstrapper for getting a fresh Windows machine ready for Codex.
 
 It is responsible for:
