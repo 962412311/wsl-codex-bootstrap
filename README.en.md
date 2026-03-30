@@ -1,4 +1,4 @@
-# WSL Codex Bootstrap
+﻿# WSL Codex Bootstrap
 
 [English](./README.en.md) | [简体中文](./README.md)
 
@@ -7,7 +7,7 @@ This repository is the Windows-side bootstrapper for getting a fresh Windows mac
 Run it once and it installs WSL, Codex, and all 32 skills from the configured skills manifest.
 
 The script also writes Codex's default model as `gpt-5.4-mini`.
-After installation and before each automatic launch, it also updates Codex to the latest version inside WSL and checks whether the subscription is nearing expiry or already expired; it only warns and does not block.
+After installation and before each automatic launch, it first checks whether Codex is already up to date inside WSL, updates only when it is not, and also checks whether the subscription is nearing expiry or already expired; it only warns and does not block.
 
 It is responsible for:
 

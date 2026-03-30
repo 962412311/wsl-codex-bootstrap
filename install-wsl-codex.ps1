@@ -240,7 +240,6 @@ function Ensure-DistroInitialized {
 
     Write-WarnEx "The distro may still need first-time initialization."
     Write-WarnEx 'An interactive WSL window will open. Finish Linux user creation, then type `exit` to return here.'
-    Confirm-ManualStep "是否打开 $TargetDistro 完成首次初始化？"
     & wsl.exe -d $TargetDistro
 
     $probe2 = Invoke-WslBash -TargetDistro $TargetDistro -User 'root' -Command 'printf __WSL_READY__' -AllowFailure -CaptureOutput
@@ -315,7 +314,6 @@ function Install-LinuxBasePackages {
         $packages += 'bubblewrap'
     }
 
-    Confirm-ManualStep "是否在 $TargetDistro 中安装基础开发工具？"
 
     $rootScript = @'
 set -euo pipefail
@@ -342,8 +340,7 @@ function Install-NvmNodeAndCodex {
         [string]$LinuxUser
     )
 
-    Write-Section "Install nvm / Node LTS / Codex for $LinuxUser"
-    Confirm-ManualStep "是否在 $TargetDistro 中安装 nvm、Node.js LTS 和 Codex？"
+    Write-Section "为 $LinuxUser 安装 nvm / Node.js LTS / Codex"
 
     $userScript = @'
 set -euo pipefail
@@ -390,7 +387,7 @@ echo "codex version: $("$codex_bin" --version)"
 '@
 
     Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
-    Write-Ok 'nvm, Node, and Codex installed.'
+    Write-Ok '已安装 nvm、Node.js LTS 和 Codex。'
 }
 
 function Install-CodexAutoUpdateWrapper {
@@ -399,8 +396,7 @@ function Install-CodexAutoUpdateWrapper {
         [string]$LinuxUser
     )
 
-    Write-Section "Install Codex auto-update wrapper for $LinuxUser"
-    Confirm-ManualStep "是否在 $TargetDistro 中安装 Codex 自动更新包装器？"
+    Write-Section "为 $LinuxUser 安装 Codex 自动更新包装器"
 
     $userScript = @'
 set -euo pipefail
@@ -502,14 +498,40 @@ PY
 
 update_codex() {
   if ! command -v npm >/dev/null 2>&1; then
-    echo '[WARN] npm not found; skipping Codex update.'
+    echo '[WARN] 未找到 npm，跳过 Codex 更新。'
     return 0
   fi
 
-  echo '[INFO] Updating Codex to the latest version.'
+  if [ ! -x "$real_codex" ]; then
+    echo '[INFO] 未检测到已安装的 Codex，开始安装最新版本。'
+    mkdir -p "$codex_prefix"
+    if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
+      echo '[OK] Codex 已安装。'
+    else
+      echo '[WARN] Codex 安装失败，将继续使用当前版本。'
+    fi
+    return 0
+  fi
+
+  current_version="$($real_codex --version 2>/dev/null | awk '{print $NF}')"
+  latest_version="$(npm view @openai/codex version --silent 2>/dev/null || true)"
+
+  if [ -z "$latest_version" ]; then
+    echo '[WARN] 无法获取 Codex 最新版本，跳过自动更新。'
+    return 0
+  fi
+
+  if [ "$current_version" = "$latest_version" ]; then
+    echo "[INFO] Codex 已是最新版本：$current_version。"
+    return 0
+  fi
+
+  echo "[INFO] 检测到 Codex 新版本：$current_version -> $latest_version，开始更新。"
   mkdir -p "$codex_prefix"
-  if ! npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
-    echo '[WARN] Codex update failed; continuing with the installed version.'
+  if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
+    echo "[OK] Codex 已更新到最新版本：$latest_version。"
+  else
+    echo '[WARN] Codex 更新失败，将继续使用当前版本。'
   fi
 }
 
@@ -525,7 +547,7 @@ chmod +x "$HOME/.local/bin/codex"
 '@
 
     Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
-    Write-Ok 'Codex auto-update wrapper installed.'
+    Write-Ok '已安装 Codex 自动更新包装器。'
 }
 
 function Ensure-CodexDefaultModel {
@@ -534,8 +556,7 @@ function Ensure-CodexDefaultModel {
         [string]$LinuxUser
     )
 
-    Write-Section "Set Codex default model for $LinuxUser"
-    Confirm-ManualStep '是否写入 Codex 默认模型 gpt-5.4-mini？'
+    Write-Section "为 $LinuxUser 写入 Codex 默认模型"
 
     $userScript = @'
 set -euo pipefail
@@ -583,7 +604,7 @@ echo "Default model: gpt-5.4-mini"
 '@
 
     Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
-    Write-Ok 'Codex default model set to gpt-5.4-mini.'
+    Write-Ok '已将 Codex 默认模型设为 gpt-5.4-mini。'
 }
 
 function Check-CodexSubscriptionStatus {
@@ -776,7 +797,6 @@ function Install-CodexSkills {
         return
     }
 
-    Confirm-ManualStep "是否在 $TargetDistro 中安装 Codex skills？"
 
     $sourceRoots = @{}
     foreach ($skill in $skills) {
@@ -830,9 +850,9 @@ function Install-CodexSkills {
     }
 
     $userScript = ($bash -join "`n")
-    Write-Section "Install Codex skills for $LinuxUser"
+    Write-Section "为 $LinuxUser 安装 Codex skills"
     Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
-    Write-Ok 'Codex skills installed from upstream sources.'
+    Write-Ok '已从上游仓库安装 Codex skills。'
 }
 
 function Launch-CodexInteractive {

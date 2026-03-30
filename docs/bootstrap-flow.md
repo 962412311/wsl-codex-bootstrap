@@ -1,4 +1,4 @@
-# Bootstrap Flow
+﻿# Bootstrap Flow
 
 1. Validate the Windows host.
 2. Install or update WSL.
@@ -6,7 +6,7 @@
 4. Ensure the distro is initialized and using WSL 2.
 5. Install base Linux tooling.
 6. Install `nvm`, Node.js LTS, and `@openai/codex`.
-7. Update Codex to the latest version inside WSL, then check the local Codex subscription expiry metadata and warn if it is near expiry or already expired.
+7. Check whether Codex is already up to date inside WSL; update it only if it is not, then check the local Codex subscription expiry metadata and warn if it is near expiry or already expired.
 8. Read the external skills manifest from `skills-source.json`, clone upstream repositories, and install the listed skills.
 9. Optionally launch `codex` for first-time login.
 
