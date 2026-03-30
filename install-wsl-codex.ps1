@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Distro = "Ubuntu",
     [switch]$InstallBubblewrap,
     [switch]$SkipAptUpgrade,
@@ -56,6 +56,14 @@ function Confirm-Yes {
         return $DefaultYes
     }
     return $answer.Trim().ToLowerInvariant() -in @('y', 'yes')
+}
+
+function Confirm-ManualStep {
+    param([Parameter(Mandatory)][string]$Action)
+
+    if (-not (Confirm-Yes $Action)) {
+        throw 'Cancelled by user.'
+    }
 }
 
 function Test-IsAdmin {
@@ -178,6 +186,7 @@ function Ensure-DistroInstalled {
 
     Write-Section "Install WSL distro: $TargetDistro"
     Write-Info 'This will run `wsl --install -d <Distro>` and usually requires a reboot.'
+    Confirm-ManualStep "是否现在安装 $TargetDistro 并继续？"
     Register-ResumeSelf
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--install', '-d', $TargetDistro)
     Write-WarnEx 'WSL installation command has been issued. Reboot Windows now to continue.'
@@ -231,6 +240,7 @@ function Ensure-DistroInitialized {
 
     Write-WarnEx "The distro may still need first-time initialization."
     Write-WarnEx 'An interactive WSL window will open. Finish Linux user creation, then type `exit` to return here.'
+    Confirm-ManualStep "是否打开 $TargetDistro 完成首次初始化？"
     & wsl.exe -d $TargetDistro
 
     $probe2 = Invoke-WslBash -TargetDistro $TargetDistro -User 'root' -Command 'printf __WSL_READY__' -AllowFailure -CaptureOutput
@@ -254,10 +264,12 @@ function Ensure-WslVersion2 {
     param([string]$TargetDistro)
 
     Write-Section 'Ensure WSL 2'
+    Confirm-ManualStep '是否现在更新 WSL 引擎并准备 WSL 2？'
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default-version', '2') -AllowFailure | Out-Null
     $map = Get-DistroVersionMap
     if ($map.ContainsKey($TargetDistro) -and $map[$TargetDistro] -ne '2') {
         Write-Info "Switching $TargetDistro to WSL 2..."
+        Confirm-ManualStep "是否将 $TargetDistro 切换到 WSL 2？"
         Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-version', $TargetDistro, '2')
     }
     Write-Ok "$TargetDistro is configured as WSL 2."
@@ -265,6 +277,7 @@ function Ensure-WslVersion2 {
 
 function Update-WslEngine {
     Write-Section 'Update WSL engine'
+    Confirm-ManualStep '是否更新 WSL 引擎并重启 WSL？'
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure | Out-Null
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--shutdown') -AllowFailure | Out-Null
     Write-Ok 'WSL engine updated and restarted.'
@@ -302,6 +315,8 @@ function Install-LinuxBasePackages {
         $packages += 'bubblewrap'
     }
 
+    Confirm-ManualStep "是否在 $TargetDistro 中安装基础开发工具？"
+
     $rootScript = @'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
@@ -328,6 +343,7 @@ function Install-NvmNodeAndCodex {
     )
 
     Write-Section "Install nvm / Node LTS / Codex for $LinuxUser"
+    Confirm-ManualStep "是否在 $TargetDistro 中安装 nvm、Node.js LTS 和 Codex？"
 
     $userScript = @'
 set -euo pipefail
@@ -384,6 +400,7 @@ function Install-CodexAutoUpdateWrapper {
     )
 
     Write-Section "Install Codex auto-update wrapper for $LinuxUser"
+    Confirm-ManualStep "是否在 $TargetDistro 中安装 Codex 自动更新包装器？"
 
     $userScript = @'
 set -euo pipefail
@@ -518,6 +535,7 @@ function Ensure-CodexDefaultModel {
     )
 
     Write-Section "Set Codex default model for $LinuxUser"
+    Confirm-ManualStep '是否写入 Codex 默认模型 gpt-5.4-mini？'
 
     $userScript = @'
 set -euo pipefail
@@ -758,6 +776,8 @@ function Install-CodexSkills {
         return
     }
 
+    Confirm-ManualStep "是否在 $TargetDistro 中安装 Codex skills？"
+
     $sourceRoots = @{}
     foreach ($skill in $skills) {
         if ([string]::IsNullOrWhiteSpace($skill.name) -or [string]::IsNullOrWhiteSpace($skill.sourceId) -or [string]::IsNullOrWhiteSpace($skill.sourcePath)) {
@@ -863,6 +883,7 @@ try {
     Update-WslEngine
     Ensure-DistroInstalled -TargetDistro $Distro
     Ensure-WslVersion2 -TargetDistro $Distro
+    Confirm-ManualStep "是否将 $Distro 设为默认 WSL 发行版？"
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default', $Distro) -AllowFailure | Out-Null
     Ensure-DistroInitialized -TargetDistro $Distro
 
