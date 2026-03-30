@@ -13,6 +13,16 @@
 
 ## 快速开始
 
+### 在线一键执行
+
+直接从 GitHub 运行最新的 bootstrap 脚本：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-wsl-codex.ps1' | iex"
+```
+
+如果你想固定使用某个 manifest 源，先修改 `skills-source.json`，或者把脚本下载到本地后再传 `-SkillsManifestUrl` / `-SkillsManifestPath`。
+
 ### 本地执行
 
 1. 克隆或下载这个仓库。
@@ -33,16 +43,6 @@
 .\install-wsl-codex.ps1 -InstallBubblewrap
 .\install-wsl-codex.ps1 -SkillsManifestPath "..\Codex&WSL_all_in_one\skills.manifest.json"
 ```
-
-### 在线一键执行
-
-直接从 GitHub 运行最新的 bootstrap 脚本：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-wsl-codex.ps1' | iex"
-```
-
-如果你想固定使用某个 manifest 源，先修改 `skills-source.json`，或者把脚本下载到本地后再传 `-SkillsManifestUrl` / `-SkillsManifestPath`。
 
 ## 生产环境配置
 

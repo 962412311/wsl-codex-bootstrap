@@ -13,6 +13,16 @@ It is responsible for:
 
 ## Quick Start
 
+### Online one-liner
+
+Run the latest bootstrap script directly from GitHub:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-wsl-codex.ps1' | iex"
+```
+
+If you want to pin a specific manifest source, edit `skills-source.json` first or pass `-SkillsManifestUrl` / `-SkillsManifestPath` after downloading the script locally.
+
 ### Local checkout
 
 1. Clone or download this repository.
@@ -33,16 +43,6 @@ Optional flags:
 .\install-wsl-codex.ps1 -InstallBubblewrap
 .\install-wsl-codex.ps1 -SkillsManifestPath "..\Codex&WSL_all_in_one\skills.manifest.json"
 ```
-
-### Online one-liner
-
-Run the latest bootstrap script directly from GitHub:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm 'https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-wsl-codex.ps1' | iex"
-```
-
-If you want to pin a specific manifest source, edit `skills-source.json` first or pass `-SkillsManifestUrl` / `-SkillsManifestPath` after downloading the script locally.
 
 ## Production Setup
 
