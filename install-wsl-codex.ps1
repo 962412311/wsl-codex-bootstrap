@@ -101,11 +101,14 @@ function Invoke-External {
 function Convert-ToWslPath {
     param([Parameter(Mandatory)][string]$WindowsPath)
 
-    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('wslpath', '-a', '-u', $WindowsPath) -AllowFailure -CaptureOutput
-    if ($result.ExitCode -ne 0) {
-        throw "Failed to convert path to WSL format: $WindowsPath"
+    $fullPath = [System.IO.Path]::GetFullPath($WindowsPath)
+    if ($fullPath -match '^[A-Za-z]:\\') {
+        $drive = $fullPath.Substring(0, 1).ToLowerInvariant()
+        $rest = $fullPath.Substring(2).Replace('\', '/')
+        return "/mnt/$drive$rest"
     }
-    return (($result.Output | Select-Object -First 1).ToString().Trim())
+
+    throw "Failed to convert path to WSL format: $WindowsPath"
 }
 
 function Get-OsInfo {
@@ -173,6 +176,24 @@ function Get-DistroVersionMap {
         }
     }
     return $map
+}
+
+function Get-DefaultDistro {
+    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-l', '-v') -AllowFailure -CaptureOutput
+    if ($result.ExitCode -ne 0) { return $null }
+
+    foreach ($line in $result.Output) {
+        $text = "$line".Trim()
+        if ($text.StartsWith('*')) {
+            $clean = $text.TrimStart('*').Trim()
+            $parts = $clean -split '\s{2,}'
+            if ($parts.Count -ge 1) {
+                return $parts[0].Trim()
+            }
+        }
+    }
+
+    return $null
 }
 
 function Test-Wsl2Prerequisites {
@@ -959,8 +980,27 @@ try {
     Update-WslEngine
     Ensure-DistroInstalled -TargetDistro $Distro
     Ensure-WslVersion2 -TargetDistro $Distro
-    Confirm-ManualStep "是否将 $Distro 设为默认 WSL 发行版？"
-    Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default', $Distro) -AllowFailure | Out-Null
+    $currentDefaultDistro = Get-DefaultDistro
+    if ($currentDefaultDistro -eq $Distro) {
+        Write-Ok "$Distro 已经是默认 WSL 发行版，跳过设置。"
+    }
+    elseif ($null -eq $currentDefaultDistro) {
+        Write-WarnEx '无法读取当前默认 WSL 发行版，将手动确认是否需要修改。'
+        if (Confirm-Yes "是否将 $Distro 设为默认 WSL 发行版？") {
+            Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default', $Distro) -AllowFailure | Out-Null
+            Write-Ok "$Distro 已设为默认 WSL 发行版。"
+        }
+    }
+    else {
+        Write-Info "当前默认 WSL 发行版是 $currentDefaultDistro。"
+        if (Confirm-Yes "是否将 $Distro 设为默认 WSL 发行版？") {
+            Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default', $Distro) -AllowFailure | Out-Null
+            Write-Ok "$Distro 已设为默认 WSL 发行版。"
+        }
+        else {
+            Write-Info '默认 WSL 发行版保持不变。'
+        }
+    }
     Ensure-DistroInitialized -TargetDistro $Distro
 
     $linuxUser = Get-DefaultLinuxUser -TargetDistro $Distro
