@@ -6,6 +6,8 @@ This repository is the Windows-side bootstrapper for getting a fresh Windows mac
 
 Run it once and it installs WSL, Codex, and all 32 skills from the configured skills manifest.
 
+The script also writes Codex's default model as `gpt-5.4-mini`.
+
 It is responsible for:
 
 - enabling and updating WSL

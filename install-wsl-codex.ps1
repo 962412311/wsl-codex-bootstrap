@@ -353,6 +353,63 @@ echo "codex version: $(codex --version)"
     Write-Ok 'nvm, Node, and Codex installed.'
 }
 
+function Ensure-CodexDefaultModel {
+    param(
+        [string]$TargetDistro,
+        [string]$LinuxUser
+    )
+
+    Write-Section "Set Codex default model for $LinuxUser"
+
+    $userScript = @'
+set -euo pipefail
+mkdir -p "$HOME/.codex"
+config="$HOME/.codex/config.toml"
+tmp="$(mktemp)"
+
+python3 - "$config" "$tmp" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+tmp_path = Path(sys.argv[2])
+desired_model = 'gpt-5.4-mini'
+desired_effort = 'medium'
+
+text = config_path.read_text() if config_path.exists() else ''
+lines = text.splitlines()
+
+def replace_or_prepend(key: str, value: str, lines: list[str]) -> list[str]:
+    pattern = re.compile(rf'^\s*{re.escape(key)}\s*=')
+    updated = []
+    replaced = False
+    for line in lines:
+        if pattern.match(line):
+            if not replaced:
+                updated.append(f'{key} = "{value}"')
+                replaced = True
+            continue
+        updated.append(line)
+    if not replaced:
+        updated.insert(0, f'{key} = "{value}"')
+    return updated
+
+lines = replace_or_prepend('model', desired_model, lines)
+lines = replace_or_prepend('model_reasoning_effort', desired_effort, lines)
+
+tmp_path.write_text('\n'.join(lines).rstrip() + '\n')
+PY
+
+mv "$tmp" "$config"
+echo "Codex config written: $config"
+echo "Default model: gpt-5.4-mini"
+'@
+
+    Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
+    Write-Ok 'Codex default model set to gpt-5.4-mini.'
+}
+
 function Get-SkillManifest {
     $manifestPath = $null
     $manifestUrl = $null
@@ -551,6 +608,7 @@ try {
 
     Install-LinuxBasePackages -TargetDistro $Distro
     Install-NvmNodeAndCodex -TargetDistro $Distro -LinuxUser $linuxUser
+    Ensure-CodexDefaultModel -TargetDistro $Distro -LinuxUser $linuxUser
     Install-CodexSkills -TargetDistro $Distro -LinuxUser $linuxUser
 
     Write-Section 'Installation complete'
