@@ -381,9 +381,12 @@ function Get-SkillManifest {
             $manifestPath = Join-Path $ScriptRoot $manifestPath
         }
         if (-not (Test-Path $manifestPath)) {
-            throw "Skill manifest not found: $manifestPath"
+            Write-WarnEx "Configured skill manifest path was not found: $manifestPath"
+            $manifestPath = $null
         }
-        return (Get-Content -Raw -Path $manifestPath | ConvertFrom-Json)
+        else {
+            return (Get-Content -Raw -Path $manifestPath | ConvertFrom-Json)
+        }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($manifestUrl)) {
