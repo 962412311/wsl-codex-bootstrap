@@ -1,6 +1,6 @@
 # WSL Codex Bootstrap
 
-This repository is the Windows-side bootstrapper.
+This repository is the Windows-side bootstrapper for getting a fresh Windows machine ready for Codex.
 
 It is responsible for:
 
@@ -30,16 +30,32 @@ Optional flags:
 .\install-wsl-codex.ps1 -SkillsManifestPath "..\Codex&WSL_all_in_one\skills.manifest.json"
 ```
 
-## Skills Source
+## Production Setup
 
-The installer reads `skills-source.json`, which points to the external skills repository manifest.
+For public releases, change `skills-source.json` to the raw manifest URL from the published skills repository.
 
-For local development in this workspace, it points at the sibling `Codex&WSL_all_in_one` checkout.
+Example:
 
-For public release, update it to the raw manifest URL from the published skills repository.
+```json
+{
+  "skillsManifestUrl": "https://raw.githubusercontent.com/<owner>/codex-skills-pack/main/skills.manifest.json"
+}
+```
+
+The installer still accepts `-SkillsManifestPath` and `-SkillsManifestUrl` as overrides.
+
+## Related Repository
+
+The skills inventory lives in [codex-skills-pack](https://github.com/962412311/codex-skills-pack).
 
 ## Repository Layout
 
 - `install-wsl-codex.ps1` - bootstrap installer
 - `skills-source.json` - pointer to the external skills manifest
 - `docs/bootstrap-flow.md` - installation flow overview
+
+## Notes
+
+- Rerunning the installer is intended to be safe.
+- Keep a cloned copy of the skills repository nearby if you want to test local manifest edits before publishing.
+- The installer expects a working GitHub token only when creating or updating GitHub repositories from the local automation flow.
