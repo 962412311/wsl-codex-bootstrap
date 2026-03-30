@@ -182,15 +182,10 @@ function Get-DefaultDistro {
     $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-l', '-v') -AllowFailure -CaptureOutput
     if ($result.ExitCode -ne 0) { return $null }
 
-    foreach ($line in $result.Output) {
-        $text = "$line".Trim()
-        if ($text.StartsWith('*')) {
-            $clean = $text.TrimStart('*').Trim()
-            $parts = $clean -split '\s{2,}'
-            if ($parts.Count -ge 1) {
-                return $parts[0].Trim()
-            }
-        }
+    $text = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n")
+    $match = [regex]::Match($text, '^\s*\*\s*(.+?)\s{2,}', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+    if ($match.Success) {
+        return $match.Groups[1].Value.Trim()
     }
 
     return $null
@@ -718,7 +713,7 @@ lines = replace_or_prepend('model_reasoning_effort', desired_effort, lines)
 tmp_path.write_text('\n'.join(lines).rstrip() + '\n')
 print('UPDATED')
 PY
-' )"
+)"
 
 case "$status" in
     UNCHANGED)
