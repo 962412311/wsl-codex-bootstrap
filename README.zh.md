@@ -26,7 +26,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1
 
 ## 先安装 WSL 和 Ubuntu
 
-如果你只想先把 Windows 上的 WSL 和 Ubuntu 装好，请运行 `install-wsl-ubuntu.ps1` 或直接双击 `install-wsl-ubuntu.cmd`。它只负责 WSL、Ubuntu、默认发行版和首次初始化，不会安装 Codex。
+如果你只想先把 Windows 上的 WSL 和 Ubuntu 装好，请运行 `install-wsl-ubuntu.ps1` 或直接双击 `install-wsl-ubuntu.cmd`。它只负责 WSL、Ubuntu、默认发行版和首次初始化，不会安装 Codex。设置成默认发行版后，直接执行 `wsl` 就会进入 Ubuntu。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-ubuntu.ps1
