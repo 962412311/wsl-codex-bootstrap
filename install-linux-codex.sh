@@ -73,7 +73,7 @@ install_base_packages() {
   local apt_get=(apt-get -o DPkg::Lock::Timeout=300)
   if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
-      apt_get=(sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300)
+      apt_get=(sudo apt-get -o DPkg::Lock::Timeout=300)
     else
       printf '[FAIL] install-base-packages 需要 root 或 sudo.\n' >&2
       return 1
