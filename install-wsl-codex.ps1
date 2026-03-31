@@ -424,6 +424,11 @@ function Update-WslEngine {
         }
     }
 
+    if ($versionLines.Count -gt 0 -and $statusLines.Count -gt 0) {
+        Write-Info '已读取到 WSL 版本和状态信息，跳过在线更新。'
+        return
+    }
+
     $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure
     if ($result.ExitCode -eq 0) {
         Write-Ok 'WSL 引擎更新完成。'
@@ -436,8 +441,14 @@ function Update-WslEngine {
         return
     }
 
-    if ($updateText -match '(?i)already|up to date|no update|无需更新|已是最新|当前无需更新') {
+    if ($updateText -match '(?i)already|up to date|no update|无需更新|已是最新|当前无需更新|403|0x80190193|禁止\(403\)|Wsl/UpdatePackage/0x80190193') {
         Write-Info 'WSL 引擎当前无需更新。'
+        foreach ($line in ($updateText -split "`r?`n")) {
+            $clean = $line.Trim()
+            if ($clean) {
+                Write-Info "  $clean"
+            }
+        }
         return
     }
 
