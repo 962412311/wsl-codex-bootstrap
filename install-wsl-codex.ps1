@@ -85,7 +85,7 @@ function Invoke-External {
         $output = & $FilePath @ArgumentList 2>&1
         $code = $LASTEXITCODE
         if (-not $AllowFailure -and $code -ne 0) {
-            throw "Command failed: $FilePath $($ArgumentList -join ' ')`n$($output | Out-String)"
+            throw ("Command failed: {0} {1}`n{2}" -f $FilePath, ($ArgumentList -join ' '), ($output | Out-String))
         }
         return [pscustomobject]@{ Output = $output; ExitCode = $code }
     }
@@ -93,7 +93,7 @@ function Invoke-External {
     & $FilePath @ArgumentList
     $code = $LASTEXITCODE
     if (-not $AllowFailure -and $code -ne 0) {
-        throw "Command failed: $FilePath $($ArgumentList -join ' ')"
+        throw ("Command failed: {0} {1}" -f $FilePath, ($ArgumentList -join ' '))
     }
     return [pscustomobject]@{ ExitCode = $code }
 }
@@ -132,7 +132,7 @@ function Invoke-ExternalUnicode {
         }
 
         if (-not $AllowFailure -and $process.ExitCode -ne 0) {
-            throw "Command failed: $FilePath $argumentString`n$($combined | Out-String)"
+            throw ("Command failed: {0} {1}`n{2}" -f $FilePath, $argumentString, ($combined | Out-String))
         }
 
         return [pscustomobject]@{
