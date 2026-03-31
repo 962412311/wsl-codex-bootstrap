@@ -12,8 +12,8 @@ $tempScript = Join-Path $env:TEMP 'install-wsl-codex.ps1'
 $tempLinuxScript = Join-Path $env:TEMP 'install-linux-codex.sh'
 
 try {
-    $scriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/main/install-wsl-codex.ps1"
-    $linuxScriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/main/install-linux-codex.sh"
+    $scriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/7f8e126810ee6d97c22115654d5bc5f8f9edf5d5/install-wsl-codex.ps1"
+    $linuxScriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/7f8e126810ee6d97c22115654d5bc5f8f9edf5d5/install-linux-codex.sh"
     (New-Object System.Net.WebClient).DownloadFile($scriptUrl, $tempScript)
     (New-Object System.Net.WebClient).DownloadFile($linuxScriptUrl, $tempLinuxScript)
 

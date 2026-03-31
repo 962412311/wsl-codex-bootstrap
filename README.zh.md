@@ -11,10 +11,10 @@
 
 在线一键执行请在 Windows PowerShell 或 Windows Terminal 里运行：
 
-在线安装链接： [install.ps1](https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install.ps1)
+在线安装链接： [install.ps1](https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/7f8e126810ee6d97c22115654d5bc5f8f9edf5d5/install.ps1)
 
 ```powershell
-$tmp = Join-Path $env:TEMP "install.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
+$tmp = Join-Path $env:TEMP "install.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/7f8e126810ee6d97c22115654d5bc5f8f9edf5d5/install.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
 ```
 
 本地执行也请用：
