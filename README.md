@@ -1,4 +1,4 @@
-﻿# WSL Codex Bootstrap
+# WSL Codex Bootstrap
 
 [English](./README.en.md) | [简体中文](./README.md)
 
@@ -21,7 +21,7 @@
 
 ### 在线一键执行
 
-在线安装链接： [install.ps1](https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install.ps1)
+在线安装器： [install.ps1](https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install.ps1)
 
 请在 **Windows 主机上的 PowerShell 或 Windows Terminal** 里运行，最好用管理员权限：
 
@@ -31,15 +31,15 @@ $tmp = Join-Path $env:TEMP "install.ps1"; (New-Object System.Net.WebClient).Down
 
 不要在 WSL 里面运行这条命令。
 
-### Online one-liner in WSL
+### WSL 直接在线执行
 
-Run this inside WSL to install Codex directly into the current Linux user account:
+在 WSL 里直接运行下面命令，将 Codex 安装到当前 Linux 用户账号：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-linux-codex.sh | bash -s -- bootstrap
 ```
 
-The first run may prompt for `sudo` when it installs base packages.
+首次运行安装基础包时可能会提示输入 `sudo` 密码。
 
 如果你想固定使用某个 manifest 源，先修改 `skills-source.json`，或者把脚本下载到本地后再传 `-SkillsManifestUrl` / `-SkillsManifestPath`。
 
@@ -95,7 +95,6 @@ skills 清单仓库是 [codex-skills-pack](https://github.com/962412311/codex-sk
 - 重新运行安装器应当是安全的。
 - 如果你想在发布前测试本地 manifest 修改，最好保留一份 skills 仓库的本地克隆。
 - 这个安装流程只在创建或更新 GitHub 仓库时才需要有效的 GitHub token。
-
 
 ## 先安装 WSL 和 Ubuntu
 
