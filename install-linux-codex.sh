@@ -768,7 +768,7 @@ main() {
       install_skills
       ;;
     bootstrap)
-      bootstrap "${2:-0}" "${3:-0}" "${4:-$DEFAULT_SKILLS_MANIFEST_URL}"
+      bootstrap "${2:-0}" "${3:-$DEFAULT_SKILLS_MANIFEST_URL}"
       ;;
     "")
       printf 'missing command\n' >&2
