@@ -81,3 +81,12 @@ The skills inventory lives in [codex-skills-pack](https://github.com/962412311/c
 - Rerunning the installer is intended to be safe.
 - Keep a cloned copy of the skills repository nearby if you want to test local manifest edits before publishing.
 - The installer expects a working GitHub token only when creating or updating GitHub repositories from the local automation flow.
+
+
+## Install WSL and Ubuntu First
+
+If you only want to get WSL and Ubuntu set up on Windows, run `install-wsl-ubuntu.ps1` or double-click `install-wsl-ubuntu.cmd`. It only handles WSL, Ubuntu, the default distribution, and first-time initialization. It does not install Codex.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-ubuntu.ps1
+```

@@ -81,3 +81,12 @@ skills 清单仓库是 [codex-skills-pack](https://github.com/962412311/codex-sk
 - 重新运行安装器应当是安全的。
 - 如果你想在发布前测试本地 manifest 修改，最好保留一份 skills 仓库的本地克隆。
 - 这个安装流程只在创建或更新 GitHub 仓库时才需要有效的 GitHub token。
+
+
+## 先安装 WSL 和 Ubuntu
+
+如果你只想先把 Windows 上的 WSL 和 Ubuntu 装好，请运行 `install-wsl-ubuntu.ps1`，也可以直接双击 `install-wsl-ubuntu.cmd`。它只负责 WSL、Ubuntu、默认发行版和首次初始化，不会安装 Codex。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-ubuntu.ps1
+```
