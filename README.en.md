@@ -7,7 +7,7 @@ This repository is the Windows-side bootstrapper for getting a fresh Windows mac
 Run it once and it installs WSL, Codex, and all 32 skills from the configured skills manifest.
 
 The script also writes Codex's default model as `gpt-5.4-mini`.
-After installation and before each automatic launch, it first checks whether Codex is already up to date inside WSL, updates only when it is not, and also checks whether the subscription is nearing expiry or already expired; it only warns and does not block.
+After installation and before each automatic launch, it first checks whether Codex is already up to date inside WSL, updates only when it is not, and also checks whether the subscription is nearing expiry or already expired; it only warns and does not block. It also refreshes locally installed skills and plugins once per day before launching Codex.
 
 It is responsible for:
 
@@ -20,6 +20,8 @@ It is responsible for:
 ## Quick Start
 
 ### Online one-liner
+
+Online installer: [install-wsl-codex.ps1](https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-wsl-codex.ps1)
 
 Run this in **Windows PowerShell or Windows Terminal on the Windows host**, preferably as Administrator:
 

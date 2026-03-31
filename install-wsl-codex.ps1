@@ -489,29 +489,14 @@ function Ensure-WslVersion2 {
 
 function Update-WslEngine {
     Write-Section '更新 WSL 引擎'
-    Write-Info '正在检查并更新 WSL 引擎...'
-    Write-Info '正在读取当前 WSL 版本...'
-
     $versionLines = Get-WslVersionSummary
     if ($versionLines.Count -gt 0) {
-        Write-Info '当前 WSL 版本信息：'
         foreach ($line in $versionLines) {
             Write-Info "  $line"
         }
     }
 
-    Write-Info '正在读取当前 WSL 状态...'
-
-    $statusLines = Get-WslStatusSummary
-    if ($statusLines.Count -gt 0) {
-        Write-Info '当前 WSL 状态信息：'
-        foreach ($line in $statusLines) {
-            Write-Info "  $line"
-        }
-    }
-
     $currentVersion = Get-WslInstalledVersion
-    Write-Info '正在检查最新 WSL 版本...'
     $latestVersion = Get-LatestWslVersion
 
     if ([string]::IsNullOrWhiteSpace($currentVersion)) {
@@ -519,15 +504,11 @@ function Update-WslEngine {
         return
     }
 
-    Write-Info "当前 WSL 版本：$currentVersion"
     if ([string]::IsNullOrWhiteSpace($latestVersion)) {
         Write-Info '无法读取最新 WSL 版本，跳过更新。'
         return
     }
 
-    Write-Info '最新 WSL 版本检查完成。'
-
-    Write-Info "最新 WSL 版本：$latestVersion"
     if (Test-WslVersionIsLatest -CurrentVersion $currentVersion -LatestVersion $latestVersion) {
         Write-Info 'WSL 已经是最新版本，跳过更新。'
         return
@@ -692,6 +673,151 @@ set -euo pipefail
 codex_prefix="$HOME/.codex/npm-global"
 real_codex="$codex_prefix/bin/codex"
 update_stamp="$HOME/.codex/.codex-update-check.date"
+plugins_repo="$HOME/.codex/.tmp/plugins"
+skills_manifest="$HOME/.codex/skills.manifest.json"
+skills_dir="$HOME/.codex/skills"
+skills_sync_root="$HOME/.codex/.tmp/skill-sync"
+
+update_plugins() {
+  if [ -d "$plugins_repo/.git" ]; then
+    before="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
+    if git -C "$plugins_repo" pull --ff-only --quiet >/dev/null 2>&1; then
+      after="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
+      if [ -n "$before" ] && [ "$before" = "$after" ]; then
+        echo "[INFO] 插件镜像已是最新版本：$after。"
+      else
+        echo "[OK] 插件镜像已更新：${before:-unknown} -> ${after:-unknown}。"
+      fi
+      return 0
+    fi
+    echo '[WARN] 插件镜像更新失败，将继续启动 Codex。'
+    return 0
+  fi
+
+  echo "[WARN] 未找到插件镜像仓库：$plugins_repo，跳过插件更新。"
+  return 0
+}
+
+update_skills() {
+  if [ -f "$skills_manifest" ]; then
+    mkdir -p "$skills_dir" "$skills_sync_root"
+    echo "[INFO] 开始刷新本地 skills：$skills_dir。"
+
+    python3 - "$skills_manifest" "$skills_dir" "$skills_sync_root" <<'PY'
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+skills_dir = Path(sys.argv[2])
+sync_root = Path(sys.argv[3])
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+try:
+    manifest = json.loads(manifest_path.read_text())
+except Exception as exc:
+    warn(f'无法读取 skills manifest：{exc}')
+    sys.exit(0)
+
+skills = [
+    skill for skill in manifest.get('skills', [])
+    if skill is not None and (skill.get('enabled') is None or bool(skill.get('enabled')))
+]
+if not skills:
+    info('skills manifest 为空，跳过。')
+    sys.exit(0)
+
+sources = {}
+for skill in skills:
+    name = skill.get('name')
+    source_id = skill.get('sourceId')
+    source_path = skill.get('sourcePath')
+    if not name or not source_id or not source_path:
+        warn('skills manifest 中存在缺少 name/sourceId/sourcePath 的条目，跳过。')
+        sys.exit(0)
+    if source_id not in sources:
+        source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
+        if not source or not source.get('repo'):
+            warn(f'Source 缺少 repo：{source_id}')
+            sys.exit(0)
+        sources[source_id] = source
+
+sync_root.mkdir(parents=True, exist_ok=True)
+skills_dir.mkdir(parents=True, exist_ok=True)
+
+for source_id, source in sorted(sources.items()):
+    checkout_dir = sync_root / source_id
+    if checkout_dir.exists():
+        shutil.rmtree(checkout_dir)
+    repo = source['repo']
+    cmd = ['git', 'clone', '--depth', '1']
+    ref = source.get('ref')
+    if ref:
+        cmd.extend(['--branch', str(ref)])
+    cmd.extend([repo, str(checkout_dir)])
+    subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not checkout_dir.exists():
+        warn(f'克隆 skills 源失败：{source_id}')
+        sys.exit(0)
+
+for skill in skills:
+    source_id = skill['sourceId']
+    source_path = skill['sourcePath']
+    name = skill['name']
+    checkout_dir = sync_root / source_id
+    source_dir = checkout_dir / source_path
+    dest_dir = skills_dir / name
+
+    if not source_dir.exists():
+        warn(f'找不到技能源：{source_id}/{source_path}')
+        sys.exit(0)
+
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if source_path == '.':
+        subprocess.run(
+            ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        subprocess.run(
+            ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+ok(f'已刷新 {len(skills)} 个 skills。')
+PY
+    return 0
+  fi
+
+  echo "[WARN] 未找到 skills manifest：$skills_manifest，跳过 skills 更新。"
+  return 0
+}
+
+sync_update_artifacts() {
+  if should_check_update; then
+    update_codex
+    update_plugins
+    update_skills
+    touch_update_stamp
+  fi
+}
 
 check_subscription() {
   python3 - <<'PY'
@@ -791,7 +917,7 @@ should_check_update() {
   today="$(date +%F)"
   current="$(cat "$update_stamp" 2>/dev/null || true)"
   if [ "$current" = "$today" ]; then
-    echo '[INFO] 今天已检查过 Codex 更新，跳过。'
+    echo '[INFO] 今天已检查过 Codex / skills / plugin 检查，跳过。'
     return 1
   fi
   return 0
@@ -846,8 +972,10 @@ update_codex() {
 }
 
 check_subscription
-update_codex
-if [ ! -x "$real_codex" ] && [ -x "/usr/local/bin/codex" ]; then
+sync_update_artifacts
+if [ -x "$real_codex" ]; then
+  :
+elif [ -x "/usr/local/bin/codex" ]; then
   real_codex="/usr/local/bin/codex"
 fi
 
@@ -1196,6 +1324,18 @@ function Install-CodexSkills {
         return
     }
 
+
+    $manifestJson = $manifest | ConvertTo-Json -Depth 32
+
+    $persistManifest = @'
+set -euo pipefail
+mkdir -p "$HOME/.codex"
+cat > "$HOME/.codex/skills.manifest.json" <<'EOF_MANIFEST'
+__MANIFEST_JSON__
+EOF_MANIFEST
+'@
+    $persistManifest = $persistManifest.Replace('__MANIFEST_JSON__', $manifestJson)
+    Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $persistManifest | Out-Null
 
     $sourceRoots = @{}
     foreach ($skill in $skills) {

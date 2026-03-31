@@ -430,21 +430,25 @@ function Ensure-UbuntuImported {
 
 function Ensure-WslVersion {
     Write-Section '更新 WSL 引擎'
-    Write-Info '正在读取当前 WSL 版本...'
+    $versionLines = Get-WslVersionSummary
+    if ($versionLines.Count -gt 0) {
+        foreach ($line in $versionLines) {
+            Write-Info "  $line"
+        }
+    }
+
     $currentVersion = Get-WslInstalledVersion
     if ([string]::IsNullOrWhiteSpace($currentVersion)) {
         Write-WarnEx '无法读取当前 WSL 版本，跳过更新。'
         return
     }
 
-    Write-Info "当前 WSL 版本：$currentVersion"
     $latestVersion = Get-LatestWslVersion
     if ([string]::IsNullOrWhiteSpace($latestVersion)) {
         Write-WarnEx '无法读取最新 WSL 版本，跳过更新。'
         return
     }
 
-    Write-Info "最新 WSL 版本：$latestVersion"
     if (Test-WslVersionIsLatest -CurrentVersion $currentVersion -LatestVersion $latestVersion) {
         Write-Ok 'WSL 已经是最新版本，跳过更新。'
         return
