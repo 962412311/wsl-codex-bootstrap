@@ -319,12 +319,13 @@ function Get-WslVersionSummary {
     return @($result.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
-function Get-WslVersionValues {
+function Get-WslPrimaryVersion {
     param([string[]]$Lines)
 
     foreach ($line in @($Lines)) {
-        if ($line -match '^(?:WSL version|WSL 版本|Kernel version|Kernel 版本|WSLg version|WSLg 版本|MSRDC version|MSRDC 版本|Direct3D version|Direct3D 版本|DXCore version|DXCore 版本)\s*:\s*(?<version>[0-9]+(?:\.[0-9]+){1,3}(?:[-+][^ ]+)?)\s*$') {
+        if ($line -match '^(?:WSL version|WSL 版本)\s*:\s*(?<version>[0-9]+(?:\.[0-9]+){1,3}(?:[-+][^ ]+)?)\s*$') {
             $Matches.version
+            return
         }
     }
 }
@@ -680,11 +681,9 @@ function Ensure-WslVersion2 {
 function Update-WslEngine {
     Write-Section '更新 WSL 引擎'
     $versionLines = Get-WslVersionSummary
-    $versionValues = @(Get-WslVersionValues -Lines $versionLines)
-    if ($versionValues.Count -gt 0) {
-        foreach ($version in $versionValues) {
-            Write-Info "  $version"
-        }
+    $version = Get-WslPrimaryVersion -Lines $versionLines
+    if (-not [string]::IsNullOrWhiteSpace($version)) {
+        Write-Info "  $version"
     }
 
     $currentVersion = Get-WslInstalledVersion
