@@ -435,18 +435,10 @@ function Ensure-DistroInitialized {
         }
     }
     catch {
-        # Fall through to the interactive initialization path.
+        # If the probe is noisy or unavailable, continue instead of blocking the run.
     }
 
-    Write-WarnEx '该发行版可能还需要首次初始化。'
-    Write-WarnEx '稍后会打开一个交互式 WSL 窗口。请完成 Linux 用户创建后输入 `exit` 返回。'
-    & wsl.exe -d $TargetDistro
-
-    $linuxUser = Get-DefaultLinuxUser -TargetDistro $TargetDistro
-    if ([string]::IsNullOrWhiteSpace($linuxUser)) {
-        throw "该发行版仍未完成初始化。请手动运行 `wsl -d $TargetDistro`，然后重新运行脚本。"
-    }
-    Write-Ok "$TargetDistro 首次初始化已完成。"
+    Write-WarnEx '无法自动确认发行版初始化状态，继续后续流程。'
 }
 
 function Get-DefaultLinuxUser {
