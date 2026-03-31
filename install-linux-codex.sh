@@ -623,6 +623,53 @@ emit({'status': level, 'expiry_text': expiry_text, 'remaining_days': remaining_d
 PY
 }
 
+print_subscription_summary() {
+  local subscription_json="${1:-}"
+
+  python3 - "$subscription_json" <<'PY'
+import json
+import sys
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+raw = sys.argv[1].strip()
+if not raw:
+    warn('未找到 Codex 登录信息，跳过订阅检查。')
+    sys.exit(0)
+
+try:
+    payload = json.loads(raw)
+except Exception as exc:
+    warn(f'无法读取 Codex 订阅状态：{exc}')
+    sys.exit(0)
+
+status = payload.get('status')
+if status == 'missing_auth':
+    warn('未找到 Codex 登录信息，跳过订阅检查。')
+elif status == 'not_chatgpt':
+    warn('当前 Codex 登录不是 ChatGPT 订阅，跳过订阅检查。')
+elif status == 'no_expiry':
+    warn('未找到 Codex 订阅到期时间。')
+elif status == 'read_error':
+    warn(f"无法读取 Codex 登录信息：{payload.get('message', 'unknown error')}")
+elif status == 'parse_error':
+    warn(f"无法解析 Codex 订阅到期时间：{payload.get('subscription_until', '')}")
+elif status == 'expired':
+    info(f"Codex 订阅已过期，到期时间：{payload.get('expiry_text', '')}。")
+else:
+    days = float(payload.get('remaining_days', 0))
+    expiry_text = payload.get('expiry_text', '')
+    if status == 'warning':
+        warn(f'Codex 订阅还剩 {days:.1f} 天，到期时间：{expiry_text}。')
+    else:
+        info(f'Codex 订阅还剩 {days:.1f} 天，到期时间：{expiry_text}。')
+PY
+}
+
 persist_manifest() {
   ensure_root_home
 
@@ -736,12 +783,14 @@ bootstrap() {
   local skip_upgrade="${1:-0}"
   local manifest_url="${2:-$DEFAULT_SKILLS_MANIFEST_URL}"
   local temp_manifest
+  local subscription_json
 
   install_base_packages "$skip_upgrade"
   install_node_codex
   write_codex_wrapper
   ensure_default_model
-  check_subscription_json
+  subscription_json="$(check_subscription_json)"
+  print_subscription_summary "$subscription_json"
 
   temp_manifest="$(mktemp)"
   if curl -fsSL "$manifest_url" -o "$temp_manifest"; then
