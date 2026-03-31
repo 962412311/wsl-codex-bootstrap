@@ -533,13 +533,11 @@ function Ensure-UbuntuDefaultAndInitialized {
 }
 
 function Test-WslCommandAvailable {
-    try {
-        $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--help') -AllowFailure
-        return ($result.ExitCode -eq 0)
+    if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
+        return $true
     }
-    catch {
-        return $false
-    }
+
+    return (Test-Path (Join-Path $env:WINDIR 'System32\wsl.exe'))
 }
 
 function Main {
@@ -552,7 +550,7 @@ function Main {
     Write-Info "Windows：$($os.ProductName)（Build $($os.CurrentBuild)）"
 
     if (-not (Test-WslCommandAvailable)) {
-        throw '当前系统无法调用 wsl.exe。请先启用 WSL。'
+        throw '当前系统找不到 wsl.exe。请先启用 WSL 或确认系统 PATH。'
     }
 
     Ensure-WslVersion
