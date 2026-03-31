@@ -427,8 +427,8 @@ function Ensure-DistroInitialized {
     param([string]$TargetDistro)
 
     Write-Section '检查发行版初始设置'
-    $probe = Invoke-WslBash -TargetDistro $TargetDistro -User 'root' -Command 'printf __WSL_READY__' -AllowFailure -CaptureOutput
-    if ($probe.ExitCode -eq 0 -and (($probe.Output | Out-String) -match '__WSL_READY__')) {
+    $probe = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-d', $TargetDistro, '--', 'true') -AllowFailure -CaptureOutput
+    if ($probe.ExitCode -eq 0) {
         Write-Ok "$TargetDistro 已就绪。"
         return
     }
@@ -437,8 +437,8 @@ function Ensure-DistroInitialized {
     Write-WarnEx '稍后会打开一个交互式 WSL 窗口。请完成 Linux 用户创建后输入 `exit` 返回。'
     & wsl.exe -d $TargetDistro
 
-    $probe2 = Invoke-WslBash -TargetDistro $TargetDistro -User 'root' -Command 'printf __WSL_READY__' -AllowFailure -CaptureOutput
-    if ($probe2.ExitCode -ne 0 -or (($probe2.Output | Out-String) -notmatch '__WSL_READY__')) {
+    $probe2 = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-d', $TargetDistro, '--', 'true') -AllowFailure -CaptureOutput
+    if ($probe2.ExitCode -ne 0) {
         throw "该发行版仍未完成初始化。请手动运行 `wsl -d $TargetDistro`，然后重新运行脚本。"
     }
     Write-Ok "$TargetDistro 首次初始化已完成。"
