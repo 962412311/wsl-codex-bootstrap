@@ -31,6 +31,16 @@ $tmp = Join-Path $env:TEMP "install.ps1"; (New-Object System.Net.WebClient).Down
 
 Do not run this inside WSL.
 
+### Online one-liner in WSL
+
+Run this inside WSL to install Codex directly into the current Linux user account:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-linux-codex.sh | bash -s -- bootstrap
+```
+
+The first run may prompt for `sudo` when it installs base packages.
+
 If you want to pin a specific manifest source, edit `skills-source.json` first or pass `-SkillsManifestUrl` / `-SkillsManifestPath` after downloading the script locally.
 
 ### Local checkout

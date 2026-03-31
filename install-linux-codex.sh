@@ -18,6 +18,8 @@ ensure_root_home() {
   mkdir -p "$HOME"
 }
 
+DEFAULT_SKILLS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
+
 sanitize_path() {
   local path_value="$1"
   local result=""
@@ -69,6 +71,14 @@ install_base_packages() {
 
   export DEBIAN_FRONTEND=noninteractive
   local apt_get=(apt-get -o DPkg::Lock::Timeout=300)
+  if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1; then
+      apt_get=(sudo env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300)
+    else
+      printf '[FAIL] install-base-packages 需要 root 或 sudo.\n' >&2
+      return 1
+    fi
+  fi
   "${apt_get[@]}" update
   if [ "$skip_upgrade" != "1" ]; then
     "${apt_get[@]}" upgrade -y
@@ -698,6 +708,31 @@ for skill in skills:
 PY
 }
 
+bootstrap() {
+  local skip_upgrade="${1:-0}"
+  local install_bwrap="${2:-0}"
+  local manifest_url="${3:-$DEFAULT_SKILLS_MANIFEST_URL}"
+  local temp_manifest
+
+  install_base_packages "$skip_upgrade" "$install_bwrap"
+  install_node_codex
+  write_codex_wrapper
+  ensure_default_model
+  check_subscription_json
+
+  temp_manifest="$(mktemp)"
+  if curl -fsSL "$manifest_url" -o "$temp_manifest"; then
+    persist_manifest "$temp_manifest"
+    install_skills
+  else
+    log_warn "未能下载 skills manifest：$manifest_url，跳过 skills 安装。"
+  fi
+  rm -f "$temp_manifest"
+
+  log_ok 'WSL 侧 Codex 已完成安装。'
+  log_info '进入 WSL 后运行：codex'
+}
+
 main() {
   local command="${1:-}"
   case "$command" in
@@ -721,6 +756,9 @@ main() {
       ;;
     install-skills)
       install_skills
+      ;;
+    bootstrap)
+      bootstrap "${2:-0}" "${3:-0}" "${4:-$DEFAULT_SKILLS_MANIFEST_URL}"
       ;;
     "")
       printf 'missing command\n' >&2

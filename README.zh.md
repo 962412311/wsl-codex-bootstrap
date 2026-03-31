@@ -17,6 +17,13 @@
 $tmp = Join-Path $env:TEMP "install.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
 ```
 
+WSL 里也可以直接在线执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-linux-codex.sh | bash -s -- bootstrap
+```
+
+首次运行在安装基础包时可能会要求 `sudo`。
 本地执行也请用：
 
 ```powershell
