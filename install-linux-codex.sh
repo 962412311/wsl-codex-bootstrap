@@ -184,7 +184,10 @@ def warn(message):
     print(f'[WARN] {message}')
 
 try:
-    manifest = json.loads(manifest_path.read_text())
+    manifest_text = manifest_path.read_text().strip()
+    if not manifest_text:
+        raise ValueError('skills manifest is empty')
+    manifest = json.loads(manifest_text)
 except Exception as exc:
     warn(f'无法读取 skills manifest：{exc}')
     sys.exit(0)
@@ -292,7 +295,10 @@ if not auth_path.exists():
     sys.exit(0)
 
 try:
-    auth = json.loads(auth_path.read_text())
+    auth_text = auth_path.read_text().strip()
+    if not auth_text:
+        raise ValueError('auth.json is empty')
+    auth = json.loads(auth_text)
 except Exception as exc:
     warn(f'无法读取 Codex 登录信息：{exc}')
     sys.exit(0)
@@ -543,7 +549,10 @@ if not auth_path.exists():
     sys.exit(0)
 
 try:
-    auth = json.loads(auth_path.read_text())
+    auth_text = auth_path.read_text().strip()
+    if not auth_text:
+        raise ValueError('auth.json is empty')
+    auth = json.loads(auth_text)
 except Exception as exc:
     emit({'status': 'read_error', 'message': str(exc)})
     sys.exit(0)
@@ -635,9 +644,19 @@ skills_dir = Path(sys.argv[2])
 sync_root = Path(sys.argv[3])
 
 if not manifest_path.exists():
-    raise SystemExit('skills manifest 不存在。')
+    print('skills manifest 不存在，跳过技能安装。')
+    sys.exit(0)
 
-manifest = json.loads(manifest_path.read_text())
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('skills manifest 为空，跳过技能安装。')
+    sys.exit(0)
+
+try:
+    manifest = json.loads(manifest_text)
+except Exception as exc:
+    print(f'无法读取 skills manifest：{exc}')
+    sys.exit(0)
 skills = [
     skill for skill in manifest.get('skills', [])
     if skill is not None and (skill.get('enabled') is None or bool(skill.get('enabled')))
