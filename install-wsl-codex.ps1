@@ -753,7 +753,7 @@ function Install-NvmNodeAndCodex {
     )
 
     Write-Section "为 $LinuxUser 安装 nvm / Node.js LTS / Codex"
-    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-node-codex' | Out-Null
+    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-node-codex' -User $LinuxUser | Out-Null
     Write-Ok '已安装 nvm、Node.js LTS 和 Codex。'
 }
 
@@ -764,7 +764,7 @@ function Install-CodexAutoUpdateWrapper {
     )
 
     Write-Section "为 $LinuxUser 安装 Codex 自动更新包装器"
-    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-wrapper' | Out-Null
+    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-wrapper' -User $LinuxUser | Out-Null
     Write-Ok '已安装 Codex 自动更新包装器。'
 }
 
@@ -775,7 +775,7 @@ function Ensure-CodexDefaultModel {
     )
 
     Write-Section "为 $LinuxUser 写入 Codex 默认模型"
-    $result = Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'ensure-default-model' -CaptureOutput
+    $result = Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'ensure-default-model' -User $LinuxUser -CaptureOutput
     if ($result.ExitCode -ne 0) {
         throw '更新 Codex 默认模型失败。'
     }
@@ -801,7 +801,7 @@ function Check-CodexSubscriptionStatus {
     )
 
     Write-Section "检查 $LinuxUser 的 Codex 订阅状态"
-    $result = Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'check-subscription-json' -CaptureOutput
+    $result = Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'check-subscription-json' -User $LinuxUser -CaptureOutput
     if ($result.ExitCode -ne 0) {
         Write-WarnEx '订阅检查失败，已跳过。'
         return
@@ -936,8 +936,8 @@ function Install-CodexSkills {
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($tempManifest.FullName, $manifestJson, $utf8NoBom)
         $wslManifestPath = Convert-ToWslPath -WindowsPath $tempManifest.FullName
-        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'persist-manifest' -Arguments @($wslManifestPath) | Out-Null
-        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-skills' | Out-Null
+        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'persist-manifest' -User $LinuxUser -Arguments @($wslManifestPath) | Out-Null
+        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-skills' -User $LinuxUser | Out-Null
     }
     finally {
         Remove-Item -LiteralPath $tempManifest.FullName -Force -ErrorAction SilentlyContinue

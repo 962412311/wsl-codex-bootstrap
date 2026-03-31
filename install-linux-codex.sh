@@ -208,8 +208,7 @@ for skill in skills:
         warn('skills manifest 中存在缺少 name/sourceId/sourcePath 的条目，跳过。')
         sys.exit(0)
     if source_id not in sources:
-        source = next((item for item in manifest.get('sources', []) if item.get('id') == sour
-ce_id), None)
+        source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
         if not source or not source.get('repo'):
             warn(f'Source 缺少 repo：{source_id}')
             sys.exit(0)
@@ -658,8 +657,7 @@ for skill in skills:
     if not name or not source_id or not source_path:
         raise SystemExit('每个技能清单条目都必须包含 name、sourceId 和 sourcePath。')
     if source_id not in sources:
-        source = next((item for item in manifest.get('sources', []) if item.get('id') == sour
-ce_id), None)
+        source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
         if not source or not source.get('repo'):
             raise SystemExit(f"Source '{source_id}' is missing a repo URL.")
         sources[source_id] = source
