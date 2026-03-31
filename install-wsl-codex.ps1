@@ -513,7 +513,12 @@ function Get-WslRegistryInfo {
 function Parse-LinuxUserFromOutput {
     param([object[]]$Output)
 
-    $lines = @($Output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ })
+    $lines = @($Output | ForEach-Object {
+        $text = [string]$_
+        if (-not [string]::IsNullOrWhiteSpace($text)) {
+            $text.Trim()
+        }
+    } | Where-Object { $_ })
     return @(
         $lines | Where-Object {
             $_ -match '^[A-Za-z_][A-Za-z0-9_.-]*[$]?$'
