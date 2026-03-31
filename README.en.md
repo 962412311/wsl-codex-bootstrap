@@ -24,7 +24,7 @@ It is responsible for:
 Run this in **Windows PowerShell or Windows Terminal on the Windows host**, preferably as Administrator:
 
 ```powershell
-$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/28992e00efc3394d68bc8c8df85de5cf0e5bc19a/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
+$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/4bc54d9/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
 ```
 
 Do not run this inside WSL.
@@ -41,6 +41,8 @@ If you want to pin a specific manifest source, edit `skills-source.json` first o
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1
 ```
+
+If you prefer to double-click a local launcher, use `install-wsl-codex.cmd`.
 
 Optional flags:
 

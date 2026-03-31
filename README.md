@@ -24,7 +24,7 @@
 请在 **Windows 主机上的 PowerShell 或 Windows Terminal** 里运行，最好用管理员权限：
 
 ```powershell
-$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/28992e00efc3394d68bc8c8df85de5cf0e5bc19a/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
+$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/4bc54d9/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
 ```
 
 不要在 WSL 里面运行这条命令。
@@ -41,6 +41,8 @@ $tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebCl
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1
 ```
+
+如果你想直接双击运行，也可以用 `install-wsl-codex.cmd`。
 
 可选参数：
 

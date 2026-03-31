@@ -12,7 +12,7 @@
 在线一键执行请在 Windows PowerShell 或 Windows Terminal 里运行：
 
 ```powershell
-$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/28992e00efc3394d68bc8c8df85de5cf0e5bc19a/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
+$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/4bc54d9/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
 ```
 
 本地执行也请用：
@@ -20,6 +20,8 @@ $tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebCl
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1
 ```
+
+如果你想直接双击运行，也可以用 `install-wsl-codex.cmd`。
 
 
 ## 先安装 WSL 和 Ubuntu
