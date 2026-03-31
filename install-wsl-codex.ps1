@@ -13,6 +13,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ScriptRoot = Split-Path -Parent $PSCommandPath
+$DefaultSkillsManifestUrl = 'https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
 $ConfigPath = if ([string]::IsNullOrWhiteSpace($SkillsSourceConfigPath)) {
     Join-Path $ScriptRoot 'skills-source.json'
 }
@@ -1110,6 +1111,7 @@ PY
 function Get-SkillManifest {
     $manifestPath = $null
     $manifestUrl = $null
+    $usedDefaultManifestUrl = $false
 
     if (-not [string]::IsNullOrWhiteSpace($ConfigPath) -and (Test-Path $ConfigPath)) {
         $config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
@@ -1129,6 +1131,10 @@ function Get-SkillManifest {
         $manifestUrl = $SkillsManifestUrl
         $manifestPath = $null
     }
+    elseif ([string]::IsNullOrWhiteSpace($manifestPath) -and [string]::IsNullOrWhiteSpace($manifestUrl)) {
+        $manifestUrl = $DefaultSkillsManifestUrl
+        $usedDefaultManifestUrl = $true
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($manifestPath)) {
         if (-not [System.IO.Path]::IsPathRooted($manifestPath)) {
@@ -1145,6 +1151,9 @@ function Get-SkillManifest {
 
     if (-not [string]::IsNullOrWhiteSpace($manifestUrl)) {
         $tempManifest = Join-Path $env:TEMP 'codex-skills.manifest.json'
+        if ($usedDefaultManifestUrl) {
+            Write-Info '未检测到 skills-source.json，已使用默认技能清单来源。'
+        }
         Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing -OutFile $tempManifest
         return (Get-Content -Raw -Path $tempManifest | ConvertFrom-Json)
     }
