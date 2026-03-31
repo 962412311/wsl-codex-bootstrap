@@ -103,20 +103,14 @@ install_node_codex() {
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 export PATH="$HOME/.codex/npm-global/bin:$HOME/.local/bin:$PATH"
-if printf '%s' "$PATH" | grep -Eq '/mnt/c/Users/[^/]+/AppData/Roaming/npm'; then
-  PATH="$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: '$0 !~ /\/mnt\/c\/Users\/[^/]+\/AppData\
-/Roaming\/npm/ {print}' | sed 's/:$//')"
-  export PATH
-fi
+PATH="$(sanitize_path "$PATH")"
+export PATH
 ### /codex-wsl-bootstrap ###
 EOF_BASHRC
   fi
 
-  if printf '%s' "$PATH" | grep -Eq '/mnt/c/Users/[^/]+/AppData/Roaming/npm'; then
-    PATH="$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: '$0 !~ /\/mnt\/c\/Users\/[^/]+\/AppDat
-a\/Roaming\/npm/ {print}' | sed 's/:$//')"
-    export PATH
-  fi
+  PATH="$(sanitize_path "$PATH")"
+  export PATH
 
   nvm install --lts
   nvm alias default 'lts/*'

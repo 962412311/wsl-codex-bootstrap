@@ -581,6 +581,32 @@ function Get-DefaultLinuxUser {
     throw '无法确定默认 Linux 用户。'
 }
 
+function Get-NonRootLinuxUser {
+    param([string]$TargetDistro)
+
+    $userProbe = @'
+while IFS=: read -r name _ uid _; do
+  if [ "$uid" -ge 1000 ] && [ "$name" != "nobody" ] && [ "$name" != "root" ]; then
+    printf '%s
+' "$name"
+    break
+  fi
+done < /etc/passwd 2>/dev/null
+'@
+
+    $user = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -RunAsUser 'root' -Command @('sh', '-lc', $userProbe)
+    if (-not [string]::IsNullOrWhiteSpace($user) -and $user -ne 'root') {
+        return $user
+    }
+
+    $fallback = Get-DefaultLinuxUser -TargetDistro $TargetDistro
+    if (-not [string]::IsNullOrWhiteSpace($fallback) -and $fallback -ne 'root') {
+        return $fallback
+    }
+
+    throw '未找到可用于 Codex 安装的非 root Linux 用户。'
+}
+
 function Ensure-WslVersion2 {
     param([string]$TargetDistro)
 
@@ -966,10 +992,10 @@ try {
 
     Ensure-DistroInitialized -TargetDistro $Distro
 
-    $linuxUser = 'root'
-    Write-Info '安装用户：root'
-
     Install-LinuxBasePackages -TargetDistro $Distro
+
+    $linuxUser = Get-NonRootLinuxUser -TargetDistro $Distro
+    Write-Info "安装用户：$linuxUser"
     Install-NvmNodeAndCodex -TargetDistro $Distro -LinuxUser $linuxUser
     Install-CodexAutoUpdateWrapper -TargetDistro $Distro -LinuxUser $linuxUser
     Ensure-CodexDefaultModel -TargetDistro $Distro -LinuxUser $linuxUser
