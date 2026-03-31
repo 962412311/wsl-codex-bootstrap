@@ -686,7 +686,7 @@ for source_id, source in sorted(sources.items()):
     if ref:
         cmd.extend(['--branch', str(ref)])
     cmd.extend([source['repo'], str(checkout_dir)])
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 for skill in skills:
     checkout_dir = sync_root / skill['sourceId']
