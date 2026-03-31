@@ -21,12 +21,12 @@ It is responsible for:
 
 ### Online one-liner
 
-Online installer: [install-wsl-codex.ps1](https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/f32256f7dd96c854382482ea7aca29ac5548aa27/install-wsl-codex.ps1)
+Online installer: [install-wsl-codex.ps1](https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/2479c5beba311387675e5486cd9dd14489b516f2/install-wsl-codex.ps1)
 
 Run this in **Windows PowerShell or Windows Terminal on the Windows host**, preferably as Administrator:
 
 ```powershell
-$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/f32256f7dd96c854382482ea7aca29ac5548aa27/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
+$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/2479c5beba311387675e5486cd9dd14489b516f2/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
 ```
 
 Do not run this inside WSL.
