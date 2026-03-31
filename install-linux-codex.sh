@@ -100,7 +100,7 @@ install_node_codex() {
 ### codex-wsl-bootstrap ###
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-export PATH="$HOME/.codex/npm-global/bin:$HOME/.local/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/.codex/npm-global/bin:$PATH"
 PATH="$(sanitize_path "$PATH")"
 export PATH
 ### /codex-wsl-bootstrap ###
