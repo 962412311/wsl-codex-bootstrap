@@ -257,6 +257,61 @@ function Get-WslStatusSummary {
     return @($result.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
+function Get-WslInstalledVersion {
+    $lines = Get-WslVersionSummary
+    foreach ($line in $lines) {
+        if ($line -match '^(?:WSL version|WSL 版本)\s*:\s*(?<version>[0-9]+(?:\.[0-9]+){1,3})\s*$') {
+            return $Matches.version
+        }
+    }
+    return $null
+}
+
+function Convert-ToWslVersionObject {
+    param([Parameter(Mandatory)][string]$VersionText)
+
+    $clean = $VersionText.Trim().TrimStart('v', 'V')
+    if ($clean -match '^[0-9]+\.[0-9]+\.[0-9]+$') {
+        $clean += '.0'
+    }
+
+    try {
+        return [version]$clean
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-LatestWslVersion {
+    try {
+        $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/microsoft/WSL/releases/latest' -Headers @{ 'User-Agent' = 'wsl-codex-bootstrap' } -ErrorAction Stop
+        if ($null -ne $release.tag_name -and -not [string]::IsNullOrWhiteSpace([string]$release.tag_name)) {
+            return ([string]$release.tag_name).Trim().TrimStart('v', 'V')
+        }
+    }
+    catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Test-WslVersionIsLatest {
+    param(
+        [Parameter(Mandatory)][string]$CurrentVersion,
+        [Parameter(Mandatory)][string]$LatestVersion
+    )
+
+    $currentObject = Convert-ToWslVersionObject -VersionText $CurrentVersion
+    $latestObject = Convert-ToWslVersionObject -VersionText $LatestVersion
+    if ($null -eq $currentObject -or $null -eq $latestObject) {
+        return $false
+    }
+
+    return ($currentObject -ge $latestObject)
+}
+
 function Test-Wsl2Prerequisites {
     $reasons = @()
 
@@ -409,6 +464,7 @@ function Ensure-WslVersion2 {
 function Update-WslEngine {
     Write-Section '更新 WSL 引擎'
     Write-Info '正在检查并更新 WSL 引擎...'
+
     $versionLines = Get-WslVersionSummary
     if ($versionLines.Count -gt 0) {
         Write-Info '当前 WSL 版本信息：'
@@ -416,6 +472,7 @@ function Update-WslEngine {
             Write-Info "  $line"
         }
     }
+
     $statusLines = Get-WslStatusSummary
     if ($statusLines.Count -gt 0) {
         Write-Info '当前 WSL 状态信息：'
@@ -424,41 +481,50 @@ function Update-WslEngine {
         }
     }
 
-    if ($versionLines.Count -gt 0 -and $statusLines.Count -gt 0) {
-        Write-Info '已读取到 WSL 版本和状态信息，跳过在线更新。'
-        return
-    }
+    $currentVersion = Get-WslInstalledVersion
+    $latestVersion = Get-LatestWslVersion
 
-    $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure
-    if ($result.ExitCode -eq 0) {
-        Write-Ok 'WSL 引擎更新完成。'
-        return
-    }
+    if (-not [string]::IsNullOrWhiteSpace($currentVersion) -and -not [string]::IsNullOrWhiteSpace($latestVersion)) {
+        Write-Info "当前 WSL 版本：$currentVersion"
+        Write-Info "最新 WSL 版本：$latestVersion"
+        if (Test-WslVersionIsLatest -CurrentVersion $currentVersion -LatestVersion $latestVersion) {
+            Write-Info 'WSL 已经是最新版本，跳过更新。'
+            return
+        }
 
-    $updateText = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
-    if ([string]::IsNullOrWhiteSpace($updateText)) {
-        Write-Info 'WSL 引擎当前无需更新。'
-        return
-    }
+        Write-Info "检测到 WSL 不是最新版本，准备更新到 $latestVersion。"
+        if (-not (Confirm-Yes "是否现在更新 WSL 到 $latestVersion？")) {
+            Write-Info '已跳过 WSL 更新。'
+            return
+        }
 
-    if ($updateText -match '(?i)already|up to date|no update|无需更新|已是最新|当前无需更新|403|0x80190193|禁止\(403\)|Wsl/UpdatePackage/0x80190193') {
-        Write-Info 'WSL 引擎当前无需更新。'
+        $updateResult = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--update', '--web-download') -AllowFailure
+        if ($updateResult.ExitCode -eq 0) {
+            Write-Ok 'WSL 引擎更新完成。'
+            $updatedVersion = Get-WslInstalledVersion
+            if (-not [string]::IsNullOrWhiteSpace($updatedVersion)) {
+                Write-Info "更新后的 WSL 版本：$updatedVersion"
+            }
+            return
+        }
+
+        $updateText = (($updateResult.Output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
+        if ([string]::IsNullOrWhiteSpace($updateText)) {
+            Write-WarnEx 'WSL 引擎更新失败。'
+            return
+        }
+
+        Write-WarnEx 'WSL 引擎更新失败。'
         foreach ($line in ($updateText -split "`r?`n")) {
             $clean = $line.Trim()
             if ($clean) {
-                Write-Info "  $clean"
+                Write-WarnEx "  $clean"
             }
         }
         return
     }
 
-    Write-WarnEx 'WSL 引擎更新未成功。'
-    foreach ($line in ($updateText -split "`r?`n")) {
-        $clean = $line.Trim()
-        if ($clean) {
-            Write-WarnEx "  $clean"
-        }
-    }
+    Write-Info '无法确认当前或最新 WSL 版本，跳过自动更新。'
 }
 
 function Install-LinuxBasePackages {
