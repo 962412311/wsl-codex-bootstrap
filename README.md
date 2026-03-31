@@ -21,12 +21,12 @@
 
 ### 在线一键执行
 
-在线安装链接： [install-wsl-codex.ps1](https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/6c68ae990b774c7a9fd59191880ecb475fbe6d6d/install-wsl-codex.ps1)
+在线安装链接： [install-wsl-codex.ps1](https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/418dcc528bca43679c55992854068f0872d9fcc7/install-wsl-codex.ps1)
 
 请在 **Windows 主机上的 PowerShell 或 Windows Terminal** 里运行，最好用管理员权限：
 
 ```powershell
-$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/6c68ae990b774c7a9fd59191880ecb475fbe6d6d/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
+$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/418dcc528bca43679c55992854068f0872d9fcc7/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
 ```
 
 不要在 WSL 里面运行这条命令。
