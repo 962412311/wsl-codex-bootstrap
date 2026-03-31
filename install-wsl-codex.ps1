@@ -427,18 +427,23 @@ function Ensure-DistroInitialized {
     param([string]$TargetDistro)
 
     Write-Section '检查发行版初始设置'
-    $probe = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-d', $TargetDistro, '--', 'true') -AllowFailure -CaptureOutput
-    if ($probe.ExitCode -eq 0) {
-        Write-Ok "$TargetDistro 已就绪。"
-        return
+    try {
+        $linuxUser = Get-DefaultLinuxUser -TargetDistro $TargetDistro
+        if (-not [string]::IsNullOrWhiteSpace($linuxUser)) {
+            Write-Ok "$TargetDistro 已就绪。"
+            return
+        }
+    }
+    catch {
+        # Fall through to the interactive initialization path.
     }
 
     Write-WarnEx '该发行版可能还需要首次初始化。'
     Write-WarnEx '稍后会打开一个交互式 WSL 窗口。请完成 Linux 用户创建后输入 `exit` 返回。'
     & wsl.exe -d $TargetDistro
 
-    $probe2 = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-d', $TargetDistro, '--', 'true') -AllowFailure -CaptureOutput
-    if ($probe2.ExitCode -ne 0) {
+    $linuxUser = Get-DefaultLinuxUser -TargetDistro $TargetDistro
+    if ([string]::IsNullOrWhiteSpace($linuxUser)) {
         throw "该发行版仍未完成初始化。请手动运行 `wsl -d $TargetDistro`，然后重新运行脚本。"
     }
     Write-Ok "$TargetDistro 首次初始化已完成。"
