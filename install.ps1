@@ -8,21 +8,16 @@ $ErrorActionPreference = 'Stop'
 
 $repoOwner = '962412311'
 $repoName = 'wsl-codex-bootstrap'
-$refApi = "https://api.github.com/repos/$repoOwner/$repoName/git/ref/heads/main"
 $tempScript = Join-Path $env:TEMP 'install-wsl-codex.ps1'
+$tempLinuxScript = Join-Path $env:TEMP 'install-linux-codex.sh'
 
 try {
-    $headers = @{ 'User-Agent' = 'wsl-codex-bootstrap-installer' }
-    $refInfo = Invoke-RestMethod -Uri $refApi -Headers $headers -ErrorAction Stop
-    $commitSha = [string]$refInfo.object.sha
-    if ([string]::IsNullOrWhiteSpace($commitSha)) {
-        throw 'Failed to resolve the latest installer commit from GitHub.'
-    }
-
-    $scriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/$commitSha/install-wsl-codex.ps1"
+    $scriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/main/install-wsl-codex.ps1"
+    $linuxScriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/main/install-linux-codex.sh"
     (New-Object System.Net.WebClient).DownloadFile($scriptUrl, $tempScript)
+    (New-Object System.Net.WebClient).DownloadFile($linuxScriptUrl, $tempLinuxScript)
 
-    $installerArgs = @('-BootstrapRef', $commitSha)
+    $installerArgs = @()
     if ($ForwardArgs.Count -gt 0) {
         $installerArgs += $ForwardArgs
     }
@@ -33,4 +28,5 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tempLinuxScript -Force -ErrorAction SilentlyContinue
 }
