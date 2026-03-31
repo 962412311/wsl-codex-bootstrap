@@ -476,17 +476,35 @@ function Ensure-DistroInitialized {
 
     Write-Section '检查发行版初始设置'
     try {
-        $linuxUser = Get-DefaultLinuxUser -TargetDistro $TargetDistro
+        $linuxUser = Get-NonRootLinuxUser -TargetDistro $TargetDistro
         if (-not [string]::IsNullOrWhiteSpace($linuxUser)) {
             Write-Ok "$TargetDistro 已就绪。"
+            Write-Info "检测到的 Linux 用户：$linuxUser"
             return
         }
     }
     catch {
-        # If the probe is noisy or unavailable, continue instead of blocking the run.
+        # If no non-root user exists yet, continue to the interactive setup prompt below.
     }
 
-    Write-WarnEx '无法自动确认发行版初始化状态，继续后续流程。'
+    Write-WarnEx "$TargetDistro 还未完成首次初始化。"
+    Write-WarnEx '稍后会打开交互式 WSL 窗口，请在里面创建一个普通 Linux 用户，然后输入 exit 返回。'
+    & wsl.exe -d $TargetDistro
+
+    try {
+        $linuxUser = Get-NonRootLinuxUser -TargetDistro $TargetDistro
+        if (-not [string]::IsNullOrWhiteSpace($linuxUser)) {
+            Write-Ok "$TargetDistro 首次初始化已完成。"
+            Write-Info "检测到的 Linux 用户：$linuxUser"
+            return
+        }
+    }
+    catch {
+        # Fall through to the explicit failure below.
+    }
+
+    Write-Fail "$TargetDistro 仍未检测到可用的普通 Linux 用户。请手动运行 `wsl -d $TargetDistro` 创建用户后重新运行脚本。"
+    exit 1
 }
 
 function Get-WslRegistryInfo {
