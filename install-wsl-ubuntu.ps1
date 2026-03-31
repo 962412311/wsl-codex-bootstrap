@@ -528,7 +528,7 @@ function Ensure-UbuntuDefaultAndInitialized {
 
     $ready = Test-UbuntuReady -TargetDistro $TargetDistro
     if (-not $ready.Ready) {
-        Write-Fail "$TargetDistro 仍未完成初始设置。请手动运行 `wsl -d $TargetDistro`，完成 Linux 用户创建后重新运行脚本。"
+        Write-Fail "$TargetDistro 仍未完成初始设置。请直接运行 `wsl` 完成 Linux 用户创建后重新运行脚本。"
         exit 1
     }
 

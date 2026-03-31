@@ -503,7 +503,7 @@ function Ensure-DistroInitialized {
         # Fall through to the explicit failure below.
     }
 
-    Write-Fail "$TargetDistro 仍未检测到可用的普通 Linux 用户。请手动运行 `wsl -d $TargetDistro` 创建用户后重新运行脚本。"
+    Write-Fail "$TargetDistro 仍未检测到可用的普通 Linux 用户。请直接运行 `wsl` 创建用户后重新运行脚本。"
     exit 1
 }
 
@@ -569,6 +569,11 @@ function Resolve-LinuxUserByCommand {
 function Get-DefaultLinuxUser {
     param([string]$TargetDistro)
 
+    $userLine = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -Command @('sh', '-lc', 'id -un 2>/dev/null || whoami 2>/dev/null')
+    if (-not [string]::IsNullOrWhiteSpace($userLine)) {
+        return $userLine
+    }
+
     $registryInfo = Get-WslRegistryInfo -TargetDistro $TargetDistro
     if ($null -ne $registryInfo) {
         $defaultUid = 0
@@ -579,21 +584,12 @@ function Get-DefaultLinuxUser {
             $defaultUid = -1
         }
 
-        if ($defaultUid -eq 0) {
-            return 'root'
-        }
-
         if ($defaultUid -gt 0) {
             $userFromUid = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -RunAsUser 'root' -Command @('sh', '-lc', "getent passwd $defaultUid 2>/dev/null | cut -d: -f1")
             if (-not [string]::IsNullOrWhiteSpace($userFromUid)) {
                 return $userFromUid
             }
         }
-    }
-
-    $userLine = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -Command @('sh', '-lc', 'id -un 2>/dev/null || whoami 2>/dev/null')
-    if (-not [string]::IsNullOrWhiteSpace($userLine)) {
-        return $userLine
     }
 
     $regularUser = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -RunAsUser 'root' -Command @('sh', '-lc', 'while IFS=: read -r name _ uid _; do if [ "$uid" -ge 1000 ] && [ "$name" != "nobody" ]; then printf "%s\n" "$name"; break; fi; done < /etc/passwd 2>/dev/null')
@@ -607,18 +603,25 @@ function Get-DefaultLinuxUser {
 function Get-NonRootLinuxUser {
     param([string]$TargetDistro)
 
-    $user = Get-DefaultLinuxUser -TargetDistro $TargetDistro
+    $user = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -Command @('sh', '-lc', 'id -un 2>/dev/null || whoami 2>/dev/null')
     if (-not [string]::IsNullOrWhiteSpace($user) -and $user -ne 'root') {
         return $user
     }
 
-    $regularUser = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -RunAsUser 'root' -Command @(
-        'sh',
-        '-lc',
-        'awk -F: ''$3 >= 1000 && $1 != "nobody" && $1 != "root" { print $1; exit }'' /etc/passwd 2>/dev/null'
-    )
-    if (-not [string]::IsNullOrWhiteSpace($regularUser)) {
-        return $regularUser
+    $script = @'
+set -euo pipefail
+user="$(awk -F: '$3 >= 1000 && $1 != "nobody" && $1 != "root" { print $1; exit }' /etc/passwd 2>/dev/null || true)"
+if [ -n "$user" ]; then
+  printf '__USER__:%s\n' "$user"
+fi
+'@
+
+    $result = Invoke-WslBash -TargetDistro $TargetDistro -User 'root' -Command $script -AllowFailure -CaptureOutput
+    if ($result.ExitCode -eq 0) {
+        $text = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
+        if ($text -match '__USER__:(?<user>[^\s]+)') {
+            return $Matches.user.Trim()
+        }
     }
 
     throw '未找到可用于 Codex 安装的非 root Linux 用户。'
@@ -1022,7 +1025,7 @@ try {
     Write-Section '安装完成'
     Write-Ok 'WSL、Linux 发行版、基础工具、nvm、Node LTS、Codex 和打包技能已安装。'
     Write-Info '尽量把当前项目放在 Linux 文件系统中，例如 `~/code/<project>`。'
-    Write-Info "之后可使用 `wsl -d $Distro` 进入 WSL。"
+    Write-Info '之后可直接使用 `wsl` 进入 WSL。'
     Write-Info '进入 WSL 后运行：`codex`'
 
     Launch-CodexInteractive -TargetDistro $Distro -LinuxUser $linuxUser
