@@ -1,4 +1,4 @@
-﻿﻿param(
+﻿param(
     [string]$Distro = "Ubuntu",
     [switch]$InstallBubblewrap,
     [switch]$SkipAptUpgrade,
