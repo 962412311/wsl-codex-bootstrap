@@ -24,7 +24,7 @@ It is responsible for:
 Run this in **Windows PowerShell or Windows Terminal on the Windows host**, preferably as Administrator:
 
 ```powershell
-$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; irm "https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/b487ad5/install-wsl-codex.ps1" -OutFile $tmp; powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
+$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/94e0a3e/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
 ```
 
 Do not run this inside WSL.

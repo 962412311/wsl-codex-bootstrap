@@ -12,7 +12,7 @@
 在线一键执行请在 Windows PowerShell 或 Windows Terminal 里运行：
 
 ```powershell
-$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; irm "https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/b487ad5/install-wsl-codex.ps1" -OutFile $tmp; powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
+$tmp = Join-Path $env:TEMP "install-wsl-codex.ps1"; (New-Object System.Net.WebClient).DownloadFile("https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/94e0a3e/install-wsl-codex.ps1", $tmp); powershell -NoProfile -ExecutionPolicy Bypass -File $tmp
 ```
 
 本地执行也请用：
