@@ -391,8 +391,7 @@ update_codex() {
   if [ ! -x "$real_codex" ]; then
     echo '[INFO] 未检测到已安装的 Codex，开始安装最新版本。'
     mkdir -p "$codex_prefix"
-    if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >
-/dev/null 2>&1; then
+    if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
       echo '[OK] Codex 已安装。'
     else
       echo '[WARN] Codex 安装失败，将继续使用当前版本。'
@@ -418,8 +417,7 @@ update_codex() {
 
   echo "[INFO] 检测到 Codex 新版本：$current_version -> $latest_version，开始更新。"
   mkdir -p "$codex_prefix"
-  if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/d
-ev/null 2>&1; then
+  if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
     echo "[OK] Codex 已更新到最新版本：$latest_version。"
   else
     echo '[WARN] Codex 更新失败，将继续使用当前版本。'

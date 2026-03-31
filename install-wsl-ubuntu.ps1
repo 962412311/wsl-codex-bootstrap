@@ -507,7 +507,7 @@ function Ensure-UbuntuDefaultAndInitialized {
         Write-WarnEx '无法读取当前默认 WSL 发行版。'
         if (Confirm-Yes "是否将 $TargetDistro 设为默认 WSL 发行版？") {
             Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default', $TargetDistro) | Out-Null
-            Write-Ok "$TargetDistro 已设为默认 WSL 发行版，直接运行 `wsl` 就会进入 Ubuntu。"
+            Write-Ok "$TargetDistro 已设为默认 WSL 发行版。直接运行 `wsl` 就会进入 Ubuntu。"
         }
         else {
             Write-Info '已跳过默认发行版设置。'
@@ -517,7 +517,7 @@ function Ensure-UbuntuDefaultAndInitialized {
         Write-Info "当前默认发行版是：$defaultDistro"
         if (Confirm-Yes "是否将 $TargetDistro 设为默认 WSL 发行版？") {
             Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default', $TargetDistro) | Out-Null
-            Write-Ok "$TargetDistro 已设为默认 WSL 发行版，直接运行 `wsl` 就会进入 Ubuntu。"
+            Write-Ok "$TargetDistro 已设为默认 WSL 发行版。直接运行 `wsl` 就会进入 Ubuntu。"
         }
         else {
             Write-Info '已跳过默认发行版设置。'

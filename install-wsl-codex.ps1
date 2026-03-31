@@ -644,7 +644,7 @@ function Ensure-WslVersion2 {
     Write-Section '确保 WSL 2'
     $map = Get-DistroVersionMap
     if ($map.ContainsKey($TargetDistro) -and $map[$TargetDistro] -eq '2') {
-        Write-Ok "$TargetDistro 已经是 WSL 2，跳过切换。"
+        Write-Ok "$TargetDistro 已是 WSL 2。"
         return
     }
 
@@ -656,7 +656,7 @@ function Ensure-WslVersion2 {
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default-version', '2') -AllowFailure | Out-Null
     $map = Get-DistroVersionMap
     if ($map.ContainsKey($TargetDistro) -and $map[$TargetDistro] -eq '2') {
-        Write-Ok "$TargetDistro 已经是 WSL 2，跳过切换。"
+        Write-Ok "$TargetDistro 已是 WSL 2。"
         return
     }
 
