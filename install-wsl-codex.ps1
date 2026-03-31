@@ -424,13 +424,30 @@ function Update-WslEngine {
         }
     }
 
-    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure -CaptureOutput
+    $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure
     if ($result.ExitCode -eq 0) {
         Write-Ok 'WSL 引擎更新完成。'
         return
     }
 
-    Write-WarnEx 'WSL 引擎更新失败或当前无需更新。'
+    $updateText = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
+    if ([string]::IsNullOrWhiteSpace($updateText)) {
+        Write-Info 'WSL 引擎当前无需更新。'
+        return
+    }
+
+    if ($updateText -match '(?i)already|up to date|no update|无需更新|已是最新|当前无需更新') {
+        Write-Info 'WSL 引擎当前无需更新。'
+        return
+    }
+
+    Write-WarnEx 'WSL 引擎更新未成功。'
+    foreach ($line in ($updateText -split "`r?`n")) {
+        $clean = $line.Trim()
+        if ($clean) {
+            Write-WarnEx "  $clean"
+        }
+    }
 }
 
 function Install-LinuxBasePackages {
