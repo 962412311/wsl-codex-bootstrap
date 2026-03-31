@@ -607,24 +607,18 @@ function Get-DefaultLinuxUser {
 function Get-NonRootLinuxUser {
     param([string]$TargetDistro)
 
-    $userProbe = @'
-while IFS=: read -r name _ uid _; do
-  if [ "$uid" -ge 1000 ] && [ "$name" != "nobody" ] && [ "$name" != "root" ]; then
-    printf '%s
-' "$name"
-    break
-  fi
-done < /etc/passwd 2>/dev/null
-'@
-
-    $user = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -RunAsUser 'root' -Command @('sh', '-lc', $userProbe)
+    $user = Get-DefaultLinuxUser -TargetDistro $TargetDistro
     if (-not [string]::IsNullOrWhiteSpace($user) -and $user -ne 'root') {
         return $user
     }
 
-    $fallback = Get-DefaultLinuxUser -TargetDistro $TargetDistro
-    if (-not [string]::IsNullOrWhiteSpace($fallback) -and $fallback -ne 'root') {
-        return $fallback
+    $regularUser = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -RunAsUser 'root' -Command @(
+        'sh',
+        '-lc',
+        'awk -F: ''$3 >= 1000 && $1 != "nobody" && $1 != "root" { print $1; exit }'' /etc/passwd 2>/dev/null'
+    )
+    if (-not [string]::IsNullOrWhiteSpace($regularUser)) {
+        return $regularUser
     }
 
     throw '未找到可用于 Codex 安装的非 root Linux 用户。'
