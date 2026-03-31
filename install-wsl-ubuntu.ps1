@@ -173,6 +173,16 @@ function Get-WslVersionSummary {
     return @($result.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
+function Get-WslVersionValues {
+    param([string[]]$Lines)
+
+    foreach ($line in @($Lines)) {
+        if ($line -match '^(?:WSL version|WSL 版本|Kernel version|Kernel 版本|WSLg version|WSLg 版本|MSRDC version|MSRDC 版本|Direct3D version|Direct3D 版本|DXCore version|DXCore 版本)\s*:\s*(?<version>[0-9]+(?:\.[0-9]+){1,3}(?:[-+][^ ]+)?)\s*$') {
+            $Matches.version
+        }
+    }
+}
+
 function Get-WslStatusSummary {
     $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--status') -AllowFailure
     if ($result.ExitCode -ne 0) { return @() }
@@ -431,9 +441,10 @@ function Ensure-UbuntuImported {
 function Ensure-WslVersion {
     Write-Section '更新 WSL 引擎'
     $versionLines = Get-WslVersionSummary
-    if (@($versionLines).Count -gt 0) {
-        foreach ($line in @($versionLines)) {
-            Write-Info "  $line"
+    $versionValues = @(Get-WslVersionValues -Lines $versionLines)
+    if ($versionValues.Count -gt 0) {
+        foreach ($version in $versionValues) {
+            Write-Info "  $version"
         }
     }
 
@@ -465,7 +476,7 @@ function Ensure-WslVersion {
         Write-Ok 'WSL 引擎更新完成。'
         $updatedVersion = Get-WslInstalledVersion
         if (-not [string]::IsNullOrWhiteSpace($updatedVersion)) {
-            Write-Info "更新后的 WSL 版本：$updatedVersion"
+            Write-Info "  $updatedVersion"
         }
         return
     }
