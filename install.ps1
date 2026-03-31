@@ -8,12 +8,13 @@ $ErrorActionPreference = 'Stop'
 
 $repoOwner = '962412311'
 $repoName = 'wsl-codex-bootstrap'
+$bootstrapRef = 'main'
 $tempScript = Join-Path $env:TEMP 'install-wsl-codex.ps1'
 $tempLinuxScript = Join-Path $env:TEMP 'install-linux-codex.sh'
 
 try {
-    $scriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/f8dabe54aa2eca85dc87fa5675521761df41b07e/install-wsl-codex.ps1"
-    $linuxScriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/31bf39290994d8a9be2f890fe712c0ab6678c914/install-linux-codex.sh"
+     $scriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/$bootstrapRef/install-wsl-codex.ps1"
+     $linuxScriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/$bootstrapRef/install-linux-codex.sh"
     (New-Object System.Net.WebClient).DownloadFile($scriptUrl, $tempScript)
     (New-Object System.Net.WebClient).DownloadFile($linuxScriptUrl, $tempLinuxScript)
 
@@ -22,7 +23,7 @@ try {
         $installerArgs += $ForwardArgs
     }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tempScript @installerArgs
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tempScript -BootstrapRef $bootstrapRef @installerArgs
 
     exit $LASTEXITCODE
 }
