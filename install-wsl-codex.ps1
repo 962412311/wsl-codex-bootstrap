@@ -168,9 +168,9 @@ function Get-DistroVersionMap {
     if ($result.ExitCode -ne 0) { return $map }
     foreach ($line in $result.Output) {
         $text = ("$line" -replace "`0", '').Trim()
-        if (-not $text -or $text -match '^(NAME|Windows|\*)') { continue }
+        if (-not $text -or $text -match '^(NAME|Windows)') { continue }
         $clean = $text.TrimStart('*').Trim()
-        $parts = $clean -split '\s{2,}'
+        $parts = $clean -split '\s+'
         if ($parts.Count -ge 3) {
             $map[$parts[0].Trim()] = $parts[-1].Trim()
         }
@@ -1013,7 +1013,7 @@ function Launch-CodexInteractive {
         return
     }
 
-    if (-not (Confirm-Yes '是否现在启动 Codex 进行首次登录？')) {
+    if (-not (Confirm-Yes -Prompt '是否现在启动 Codex 进行首次登录？' -DefaultYes:$false)) {
         return
     }
 
