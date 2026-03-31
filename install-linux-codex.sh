@@ -50,16 +50,17 @@ install_base_packages() {
   fi
 
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update
+  local apt_get=(apt-get -o DPkg::Lock::Timeout=300)
+  "${apt_get[@]}" update
   if [ "$skip_upgrade" != "1" ]; then
-    apt-get upgrade -y
+    "${apt_get[@]}" upgrade -y
   fi
-  apt-get install -y "${packages[@]}"
+  "${apt_get[@]}" install -y "${packages[@]}"
   if command -v fdfind >/dev/null 2>&1 && [ ! -e /usr/local/bin/fd ]; then
     ln -s "$(command -v fdfind)" /usr/local/bin/fd || true
   fi
-  apt-get autoremove -y
-  apt-get clean
+  "${apt_get[@]}" autoremove -y
+  "${apt_get[@]}" clean
 }
 
 install_node_codex() {
