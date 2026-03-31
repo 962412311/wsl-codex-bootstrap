@@ -444,12 +444,23 @@ function Ensure-DistroInitialized {
 function Get-DefaultLinuxUser {
     param([string]$TargetDistro)
 
-    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-d', $TargetDistro, '--', 'id', '-un') -AllowFailure -CaptureOutput
+    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-d', $TargetDistro, '--', 'sh', '-lc', 'id -un 2>/dev/null || whoami 2>/dev/null') -AllowFailure -CaptureOutput
+    $lines = @($result.Output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ })
+    $userLine = @(
+        $lines | Where-Object {
+            $_ -match '^[A-Za-z_][A-Za-z0-9_.-]*[$]?$'
+        }
+    ) | Select-Object -Last 1
+
+    if (-not [string]::IsNullOrWhiteSpace($userLine)) {
+        return $userLine
+    }
+
     if ($result.ExitCode -ne 0) {
         throw '无法确定默认 Linux 用户。'
     }
 
-    return (($result.Output | Select-Object -First 1).ToString().Trim())
+    throw '未能从 WSL 输出中解析默认 Linux 用户。'
 }
 
 function Ensure-WslVersion2 {
