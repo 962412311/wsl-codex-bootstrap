@@ -141,6 +141,7 @@ skills_sync_root="$HOME/.codex/.tmp/skill-sync"
 
 update_plugins() {
   if [ -d "$plugins_repo/.git" ]; then
+    echo "[INFO] 正在检查插件镜像更新。"
     before="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
     if git -C "$plugins_repo" pull --ff-only --quiet >/dev/null 2>&1; then
       after="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
@@ -161,6 +162,7 @@ update_plugins() {
 
 update_skills() {
   if [ -f "$skills_manifest" ]; then
+    echo "[INFO] 正在检查 skills 更新。"
     mkdir -p "$skills_dir" "$skills_sync_root"
 
     python3 - "$skills_manifest" "$skills_dir" "$skills_sync_root" <<'PY'
@@ -200,6 +202,8 @@ if not skills:
     info('skills manifest 为空，跳过。')
     sys.exit(0)
 
+info(f'准备安装 {len(skills)} 个 skills。')
+
 sources = {}
 for skill in skills:
     name = skill.get('name')
@@ -219,6 +223,7 @@ sync_root.mkdir(parents=True, exist_ok=True)
 skills_dir.mkdir(parents=True, exist_ok=True)
 
 for source_id, source in sorted(sources.items()):
+    info(f'正在同步 skills 源：{source_id}。')
     checkout_dir = sync_root / source_id
     if checkout_dir.exists():
         shutil.rmtree(checkout_dir)
@@ -232,7 +237,9 @@ for source_id, source in sorted(sources.items()):
     if not checkout_dir.exists():
         warn(f'克隆 skills 源失败：{source_id}')
         sys.exit(0)
+    ok(f'已同步 skills 源：{source_id}。')
 
+info('正在安装 skills 内容。')
 for skill in skills:
     source_id = skill['sourceId']
     source_path = skill['sourcePath']
@@ -486,7 +493,7 @@ current_model = get_value('model')
 current_effort = get_value('model_reasoning_effort')
 
 if current_model == desired_model and current_effort == desired_effort:
-    print('UNCHANGED')
+    print('NO_CHANGE')
     sys.exit(0)
 
 def replace_or_prepend(key, value, source_lines):
@@ -513,13 +520,13 @@ PY
   )"
 
   case "$status" in
-    UNCHANGED)
-      printf 'UNCHANGED\n'
+    NO_CHANGE)
+      printf 'Codex 默认模型已是 gpt-5.4-mini，跳过写入。\n'
       rm -f "$tmp"
       ;;
     UPDATED)
       mv "$tmp" "$config"
-      printf 'UPDATED\n'
+      printf '已将 Codex 默认模型设为 gpt-5.4-mini。\n'
       ;;
     *)
       rm -f "$tmp"
@@ -678,6 +685,7 @@ for skill in skills:
         sources[source_id] = source
 
 for source_id, source in sorted(sources.items()):
+    info(f'正在同步 skills 源：{source_id}。')
     checkout_dir = sync_root / source_id
     if checkout_dir.exists():
         shutil.rmtree(checkout_dir)
