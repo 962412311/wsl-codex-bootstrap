@@ -162,9 +162,25 @@ function Convert-ToWslPath {
 
 function Get-OsInfo {
     $cv = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+    $buildText = $cv.CurrentBuildNumber
+    if ([string]::IsNullOrWhiteSpace([string]$buildText)) {
+        $buildText = $cv.CurrentBuild
+    }
+    $build = [int]$buildText
+    $productName = [string]$cv.ProductName
+    if ($build -ge 22000 -and $productName.StartsWith('Windows 10')) {
+        $productName = 'Windows 11' + $productName.Substring('Windows 10'.Length)
+    }
+    elseif ($build -lt 22000 -and $productName.StartsWith('Windows 11')) {
+        $productName = 'Windows 10' + $productName.Substring('Windows 11'.Length)
+    }
+    if ([string]::IsNullOrWhiteSpace($productName)) {
+        $productName = if ($build -ge 22000) { 'Windows 11' } else { 'Windows 10' }
+    }
+
     [pscustomobject]@{
-        ProductName    = $cv.ProductName
-        CurrentBuild   = [int]$cv.CurrentBuild
+        ProductName    = $productName
+        CurrentBuild   = $build
         DisplayVersion = $cv.DisplayVersion
     }
 }
