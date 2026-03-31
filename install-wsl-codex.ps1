@@ -683,7 +683,9 @@ function Install-LinuxBasePackages {
     param([string]$TargetDistro)
 
     Write-Section '安装 Linux 基础包'
-    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-base-packages' -Arguments @((if ($SkipAptUpgrade) { '1' } else { '0' }), (if ($InstallBubblewrap) { '1' } else { '0' })) | Out-Null
+    $skipAptUpgradeFlag = if ($SkipAptUpgrade) { '1' } else { '0' }
+    $installBubblewrapFlag = if ($InstallBubblewrap) { '1' } else { '0' }
+    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-base-packages' -Arguments @($skipAptUpgradeFlag, $installBubblewrapFlag) | Out-Null
     Write-Ok 'Linux 基础包已安装。'
 }
 
