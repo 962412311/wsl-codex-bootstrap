@@ -18,7 +18,7 @@ try {
     (New-Object System.Net.WebClient).DownloadFile($linuxScriptUrl, $tempLinuxScript)
 
     $installerArgs = @()
-    if ($ForwardArgs.Count -gt 0) {
+    if (@($ForwardArgs).Count -gt 0) {
         $installerArgs += $ForwardArgs
     }
 
