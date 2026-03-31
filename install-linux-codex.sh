@@ -650,6 +650,15 @@ manifest_path = Path(sys.argv[1])
 skills_dir = Path(sys.argv[2])
 sync_root = Path(sys.argv[3])
 
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
 if not manifest_path.exists():
     print('skills manifest 不存在，跳过技能安装。')
     sys.exit(0)
