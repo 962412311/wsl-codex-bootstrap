@@ -1467,6 +1467,11 @@ try {
             Write-Info '默认 WSL 发行版保持不变。'
         }
     }
+    $wslPrereq = Test-Wsl2Prerequisites
+    if (-not $wslPrereq.Ready) {
+        throw "当前系统不满足 WSL 2 运行条件：$($wslPrereq.Reasons -join '；')。请先启用相关 Windows 功能和硬件虚拟化后再重新运行脚本。"
+    }
+
     Ensure-DistroInitialized -TargetDistro $Distro
 
     $linuxUser = Get-DefaultLinuxUser -TargetDistro $Distro
