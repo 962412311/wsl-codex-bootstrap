@@ -1561,27 +1561,8 @@ try {
 
     Ensure-DistroInitialized -TargetDistro $Distro
 
-    $linuxUser = $null
-    try {
-        $linuxUser = Get-DefaultLinuxUser -TargetDistro $Distro
-    }
-    catch {
-        Write-WarnEx '无法自动识别默认 Linux 用户，将改用发行版默认用户继续。'
-    }
-
-    if ([string]::IsNullOrWhiteSpace($linuxUser)) {
-        Write-Info '默认 Linux 用户：<发行版默认用户>'
-    }
-    else {
-        Write-Info "默认 Linux 用户：$linuxUser"
-    }
-
-    if ($linuxUser -eq 'root') {
-        Write-WarnEx '默认 Linux 用户是 root。'
-        if (-not (Confirm-Yes '是否继续以 root 身份安装？')) {
-            throw '已取消。'
-        }
-    }
+    $linuxUser = 'root'
+    Write-Info '安装用户：root'
 
     Install-LinuxBasePackages -TargetDistro $Distro
     Install-NvmNodeAndCodex -TargetDistro $Distro -LinuxUser $linuxUser
