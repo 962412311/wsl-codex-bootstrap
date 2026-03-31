@@ -728,8 +728,12 @@ bootstrap() {
 
   temp_manifest="$(mktemp)"
   if curl -fsSL "$manifest_url" -o "$temp_manifest"; then
-    persist_manifest "$temp_manifest"
-    install_skills
+    if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
+      persist_manifest "$temp_manifest"
+      install_skills
+    else
+      log_warn "下载到的 skills manifest 无效：$manifest_url，跳过 skills 安装。"
+    fi
   else
     log_warn "未能下载 skills manifest：$manifest_url，跳过 skills 安装。"
   fi
