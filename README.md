@@ -62,7 +62,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -Distro Ubuntu
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -SkipAptUpgrade
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -NoAutoLaunchCodex
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -InstallBubblewrap
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-wsl-codex.ps1 -SkillsManifestPath "..\Codex&WSL_all_in_one\skills.manifest.json"
 ```
 

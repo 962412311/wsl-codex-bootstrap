@@ -40,7 +40,6 @@ sanitize_path() {
 
 install_base_packages() {
   local skip_upgrade="$1"
-  local install_bwrap="$2"
   local packages=(
     ca-certificates
     curl
@@ -63,11 +62,8 @@ install_base_packages() {
     dnsutils
     iputils-ping
     moreutils
+    bubblewrap
   )
-
-  if [ "$install_bwrap" = "1" ]; then
-    packages+=(bubblewrap)
-  fi
 
   export DEBIAN_FRONTEND=noninteractive
   local apt_get=(sudo apt-get -o DPkg::Lock::Timeout=300)
@@ -702,11 +698,10 @@ PY
 
 bootstrap() {
   local skip_upgrade="${1:-0}"
-  local install_bwrap="${2:-0}"
-  local manifest_url="${3:-$DEFAULT_SKILLS_MANIFEST_URL}"
+  local manifest_url="${2:-$DEFAULT_SKILLS_MANIFEST_URL}"
   local temp_manifest
 
-  install_base_packages "$skip_upgrade" "$install_bwrap"
+  install_base_packages "$skip_upgrade"
   install_node_codex
   write_codex_wrapper
   ensure_default_model
@@ -729,7 +724,7 @@ main() {
   local command="${1:-}"
   case "$command" in
     install-base-packages)
-      install_base_packages "${2:-0}" "${3:-0}"
+      install_base_packages "${2:-0}"
       ;;
     install-node-codex)
       install_node_codex

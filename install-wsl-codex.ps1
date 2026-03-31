@@ -1,6 +1,5 @@
 ﻿param(
     [string]$Distro = "Ubuntu",
-    [switch]$InstallBubblewrap,
     [switch]$SkipAptUpgrade,
     [switch]$NoAutoLaunchCodex,
     [switch]$SkipHostChecks,
@@ -249,7 +248,6 @@ function Register-ResumeSelf {
     }
 
     $cmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
-    if ($InstallBubblewrap) { $cmd += ' -InstallBubblewrap' }
     if ($SkipAptUpgrade) { $cmd += ' -SkipAptUpgrade' }
     if ($NoAutoLaunchCodex) { $cmd += ' -NoAutoLaunchCodex' }
     if ($Distro -ne 'Ubuntu') { $cmd += " -Distro `"$Distro`"" }
@@ -740,8 +738,7 @@ function Install-LinuxBasePackages {
 
     Write-Section '安装 Linux 基础包'
     $skipAptUpgradeFlag = if ($SkipAptUpgrade) { '1' } else { '0' }
-    $installBubblewrapFlag = if ($InstallBubblewrap) { '1' } else { '0' }
-    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-base-packages' -Arguments @($skipAptUpgradeFlag, $installBubblewrapFlag) | Out-Null
+    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-base-packages' -Arguments @($skipAptUpgradeFlag) | Out-Null
     Write-Ok 'Linux 基础包已安装。'
 }
 
