@@ -100,8 +100,8 @@ install_node_codex() {
 ### codex-wsl-bootstrap ###
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-export PATH="$HOME/.local/bin:$HOME/.codex/npm-global/bin:$PATH"
-PATH="$(sanitize_path "$PATH")"
+PATH="$HOME/.local/bin:$HOME/.codex/npm-global/bin:$PATH"
+PATH="$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: '!seen[$0]++' | sed 's/:$//')"
 export PATH
 ### /codex-wsl-bootstrap ###
 EOF_BASHRC
