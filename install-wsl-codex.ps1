@@ -346,12 +346,10 @@ function Update-WslEngine {
     $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure -CaptureOutput
     if ($result.ExitCode -eq 0) {
         Write-Ok 'WSL 引擎更新完成。'
+        return
     }
-    else {
-        Write-WarnEx 'WSL 引擎更新失败或当前无需更新。'
-    }
-    Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--shutdown') -AllowFailure | Out-Null
-    Write-Ok 'WSL 已重启。'
+
+    Write-WarnEx 'WSL 引擎更新失败或当前无需更新。'
 }
 
 function Install-LinuxBasePackages {
