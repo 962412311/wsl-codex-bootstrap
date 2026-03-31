@@ -431,8 +431,8 @@ function Ensure-UbuntuImported {
 function Ensure-WslVersion {
     Write-Section '更新 WSL 引擎'
     $versionLines = Get-WslVersionSummary
-    if ($versionLines.Count -gt 0) {
-        foreach ($line in $versionLines) {
+    if (@($versionLines).Count -gt 0) {
+        foreach ($line in @($versionLines)) {
             Write-Info "  $line"
         }
     }
