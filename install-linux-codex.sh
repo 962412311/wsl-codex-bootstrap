@@ -18,6 +18,24 @@ ensure_root_home() {
   mkdir -p "$HOME"
 }
 
+sanitize_path() {
+  local path_value="$1"
+  local result=""
+  local segment
+  local IFS=:
+  for segment in $path_value; do
+    if [[ "$segment" == /mnt/c/Users/*/AppData/Roaming/npm ]]; then
+      continue
+    fi
+    if [ -z "$result" ]; then
+      result="$segment"
+    else
+      result="$result:$segment"
+    fi
+  done
+  printf '%s' "$result"
+}
+
 install_base_packages() {
   local skip_upgrade="$1"
   local install_bwrap="$2"
