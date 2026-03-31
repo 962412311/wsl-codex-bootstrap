@@ -452,10 +452,11 @@ function Ensure-DistroInitialized {
 function Get-DefaultLinuxUser {
     param([string]$TargetDistro)
 
-    $result = Invoke-WslBash -TargetDistro $TargetDistro -Command 'id -un' -AllowFailure -CaptureOutput
+    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-d', $TargetDistro, '--', 'id', '-un') -AllowFailure -CaptureOutput
     if ($result.ExitCode -ne 0) {
         throw '无法确定默认 Linux 用户。'
     }
+
     return (($result.Output | Select-Object -First 1).ToString().Trim())
 }
 
