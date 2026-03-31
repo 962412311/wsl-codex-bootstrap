@@ -441,26 +441,96 @@ function Ensure-DistroInitialized {
     Write-WarnEx '无法自动确认发行版初始化状态，继续后续流程。'
 }
 
-function Get-DefaultLinuxUser {
+function Get-WslRegistryInfo {
     param([string]$TargetDistro)
 
-    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-d', $TargetDistro, '--', 'sh', '-lc', 'id -un 2>/dev/null || whoami 2>/dev/null') -AllowFailure -CaptureOutput
-    $lines = @($result.Output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ })
-    $userLine = @(
+    $baseKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
+    if (-not (Test-Path $baseKey)) {
+        return $null
+    }
+
+    foreach ($key in Get-ChildItem -Path $baseKey -ErrorAction SilentlyContinue) {
+        $props = Get-ItemProperty -Path $key.PSPath -ErrorAction SilentlyContinue
+        if ($null -eq $props) {
+            continue
+        }
+        if ([string]::Equals([string]$props.DistributionName, $TargetDistro, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $props
+        }
+    }
+
+    return $null
+}
+
+function Parse-LinuxUserFromOutput {
+    param([object[]]$Output)
+
+    $lines = @($Output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ })
+    return @(
         $lines | Where-Object {
             $_ -match '^[A-Za-z_][A-Za-z0-9_.-]*[$]?$'
         }
     ) | Select-Object -Last 1
+}
 
+function Resolve-LinuxUserByCommand {
+    param(
+        [string]$TargetDistro,
+        [string[]]$Command,
+        [string]$RunAsUser
+    )
+
+    $args = @('-d', $TargetDistro)
+    if (-not [string]::IsNullOrWhiteSpace($RunAsUser)) {
+        $args += @('-u', $RunAsUser)
+    }
+    $args += @('--') + $Command
+
+    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList $args -AllowFailure -CaptureOutput
+    $userLine = Parse-LinuxUserFromOutput -Output $result.Output
     if (-not [string]::IsNullOrWhiteSpace($userLine)) {
         return $userLine
     }
 
-    if ($result.ExitCode -ne 0) {
-        throw '无法确定默认 Linux 用户。'
+    return $null
+}
+
+function Get-DefaultLinuxUser {
+    param([string]$TargetDistro)
+
+    $registryInfo = Get-WslRegistryInfo -TargetDistro $TargetDistro
+    if ($null -ne $registryInfo) {
+        $defaultUid = 0
+        try {
+            $defaultUid = [int64]$registryInfo.DefaultUid
+        }
+        catch {
+            $defaultUid = -1
+        }
+
+        if ($defaultUid -eq 0) {
+            return 'root'
+        }
+
+        if ($defaultUid -gt 0) {
+            $userFromUid = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -RunAsUser 'root' -Command @('sh', '-lc', "getent passwd $defaultUid 2>/dev/null | cut -d: -f1")
+            if (-not [string]::IsNullOrWhiteSpace($userFromUid)) {
+                return $userFromUid
+            }
+        }
     }
 
-    throw '未能从 WSL 输出中解析默认 Linux 用户。'
+    $userLine = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -Command @('sh', '-lc', 'id -un 2>/dev/null || whoami 2>/dev/null')
+    if (-not [string]::IsNullOrWhiteSpace($userLine)) {
+        return $userLine
+    }
+
+    $regularUser = Resolve-LinuxUserByCommand -TargetDistro $TargetDistro -RunAsUser 'root' -Command @('sh', '-lc', 'while IFS=: read -r name _ uid _; do if [ "$uid" -ge 1000 ] && [ "$name" != "nobody" ]; then printf "%s\n" "$name"; break; fi; done < /etc/passwd 2>/dev/null')
+    if (-not [string]::IsNullOrWhiteSpace($regularUser)) {
+        return $regularUser
+    }
+
+    throw '无法确定默认 Linux 用户。'
 }
 
 function Ensure-WslVersion2 {
