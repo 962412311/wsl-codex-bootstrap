@@ -6,7 +6,8 @@
     [switch]$SkipHostChecks,
     [string]$SkillsSourceConfigPath,
     [string]$SkillsManifestPath,
-    [string]$SkillsManifestUrl
+    [string]$SkillsManifestUrl,
+    [string]$BootstrapRef
 )
 
 Set-StrictMode -Version Latest
@@ -14,6 +15,11 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptRoot = Split-Path -Parent $PSCommandPath
 $DefaultSkillsManifestUrl = 'https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
+$BootstrapRepoOwner = '962412311'
+$BootstrapRepoName = 'wsl-codex-bootstrap'
+$LinuxInstallerFileName = 'install-linux-codex.sh'
+$LinuxInstallerLocalPath = Join-Path $ScriptRoot $LinuxInstallerFileName
+$script:ResolvedLinuxInstallerPath = $null
 $ConfigPath = if ([string]::IsNullOrWhiteSpace($SkillsSourceConfigPath)) {
     Join-Path $ScriptRoot 'skills-source.json'
 }
@@ -162,6 +168,48 @@ function Convert-ToWslPath {
     }
 
     throw "Failed to convert path to WSL format: $WindowsPath"
+}
+
+function Get-LinuxInstallerPath {
+    if (-not [string]::IsNullOrWhiteSpace($script:ResolvedLinuxInstallerPath) -and (Test-Path $script:ResolvedLinuxInstallerPath)) {
+        return $script:ResolvedLinuxInstallerPath
+    }
+
+    if (Test-Path $LinuxInstallerLocalPath) {
+        $script:ResolvedLinuxInstallerPath = $LinuxInstallerLocalPath
+        return $script:ResolvedLinuxInstallerPath
+    }
+
+    $ref = if ([string]::IsNullOrWhiteSpace($BootstrapRef)) { 'main' } else { $BootstrapRef }
+    $url = "https://raw.githubusercontent.com/$BootstrapRepoOwner/$BootstrapRepoName/$ref/$LinuxInstallerFileName"
+    $tempPath = Join-Path $env:TEMP $LinuxInstallerFileName
+    Invoke-WebRequest -Uri $url -UseBasicParsing -OutFile $tempPath
+    $script:ResolvedLinuxInstallerPath = $tempPath
+    return $script:ResolvedLinuxInstallerPath
+}
+
+function Invoke-LinuxInstaller {
+    param(
+        [Parameter(Mandatory)][string]$TargetDistro,
+        [Parameter(Mandatory)][string]$Command,
+        [string[]]$Arguments = @(),
+        [string]$User = 'root',
+        [switch]$AllowFailure,
+        [switch]$CaptureOutput
+    )
+
+    $installerPath = Get-LinuxInstallerPath
+    $wslInstallerPath = Convert-ToWslPath -WindowsPath $installerPath
+    $args = @('-d', $TargetDistro)
+    if (-not [string]::IsNullOrWhiteSpace($User)) {
+        $args += @('-u', $User)
+    }
+    $args += @('--', 'bash', $wslInstallerPath, $Command)
+    if ($Arguments.Count -gt 0) {
+        $args += $Arguments
+    }
+
+    return Invoke-External -FilePath 'wsl.exe' -ArgumentList $args -AllowFailure:$AllowFailure -CaptureOutput:$CaptureOutput
 }
 
 function Get-OsInfo {
@@ -635,51 +683,7 @@ function Install-LinuxBasePackages {
     param([string]$TargetDistro)
 
     Write-Section '安装 Linux 基础包'
-    $packages = @(
-        'ca-certificates',
-        'curl',
-        'git',
-        'jq',
-        'ripgrep',
-        'fd-find',
-        'unzip',
-        'zip',
-        'xz-utils',
-        'rsync',
-        'openssh-client',
-        'build-essential',
-        'pkg-config',
-        'python3',
-        'python3-pip',
-        'python3-venv',
-        'cmake',
-        'ninja-build',
-        'dnsutils',
-        'iputils-ping',
-        'moreutils'
-    )
-
-    if ($InstallBubblewrap) {
-        $packages += 'bubblewrap'
-    }
-
-
-    $rootScript = @'
-set -euo pipefail
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-__UPGRADE_STEP__
-apt-get install -y __PACKAGES__
-if command -v fdfind >/dev/null 2>&1 && [ ! -e /usr/local/bin/fd ]; then
-  ln -s "$(command -v fdfind)" /usr/local/bin/fd || true
-fi
-apt-get autoremove -y
-apt-get clean
-'@
-
-    $upgradeCmd = if ($SkipAptUpgrade) { ':' } else { 'apt-get upgrade -y' }
-    $rootScript = $rootScript.Replace('__UPGRADE_STEP__', $upgradeCmd).Replace('__PACKAGES__', ($packages -join ' '))
-    Invoke-WslBash -TargetDistro $TargetDistro -User 'root' -Command $rootScript | Out-Null
+    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-base-packages' -Arguments @((if ($SkipAptUpgrade) { '1' } else { '0' }), (if ($InstallBubblewrap) { '1' } else { '0' })) | Out-Null
     Write-Ok 'Linux 基础包已安装。'
 }
 
@@ -690,54 +694,7 @@ function Install-NvmNodeAndCodex {
     )
 
     Write-Section "为 $LinuxUser 安装 nvm / Node.js LTS / Codex"
-
-$userScript = @'
-set -euo pipefail
-codex_prefix="$HOME/.codex/npm-global"
-mkdir -p "$HOME/.local/bin" "$HOME/code" "$codex_prefix"
-
-set +u
-if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
-fi
-
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-export PATH="$codex_prefix/bin:$HOME/.local/bin:$PATH"
-
-if ! grep -q '### codex-wsl-bootstrap ###' "$HOME/.bashrc" 2>/dev/null; then
-  cat >> "$HOME/.bashrc" <<'EOF_BASHRC'
-
-### codex-wsl-bootstrap ###
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-export PATH="$HOME/.codex/npm-global/bin:$HOME/.local/bin:$PATH"
-if printf '%s' "$PATH" | grep -Eq '/mnt/c/Users/[^/]+/AppData/Roaming/npm'; then
-  PATH="$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: '$0 !~ /\/mnt\/c\/Users\/[^/]+\/AppData\/Roaming\/npm/ {print}' | sed 's/:$//')"
-  export PATH
-fi
-### /codex-wsl-bootstrap ###
-EOF_BASHRC
-fi
-
-if printf '%s' "$PATH" | grep -Eq '/mnt/c/Users/[^/]+/AppData/Roaming/npm'; then
-  PATH="$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: '$0 !~ /\/mnt\/c\/Users\/[^/]+\/AppData\/Roaming\/npm/ {print}' | sed 's/:$//')"
-  export PATH
-fi
-
-nvm install --lts
-nvm alias default 'lts/*'
-nvm use --lts
-set -u
-npm i -g --prefix "$codex_prefix" @openai/codex@latest
-codex_bin="$codex_prefix/bin/codex"
-
-echo "Node version: $(node -v)"
-echo "npm version : $(npm -v)"
-echo "codex version: $("$codex_bin" --version)"
-'@
-
-    Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
+    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-node-codex' | Out-Null
     Write-Ok '已安装 nvm、Node.js LTS 和 Codex。'
 }
 
@@ -748,329 +705,7 @@ function Install-CodexAutoUpdateWrapper {
     )
 
     Write-Section "为 $LinuxUser 安装 Codex 自动更新包装器"
-
-    $userScript = @'
-set -euo pipefail
-mkdir -p "$HOME/.local/bin"
-cat > "$HOME/.local/bin/codex" <<'EOF_WRAPPER'
-#!/usr/bin/env bash
-set -euo pipefail
-
-codex_prefix="$HOME/.codex/npm-global"
-real_codex="$codex_prefix/bin/codex"
-update_stamp="$HOME/.codex/.codex-update-check.date"
-plugins_repo="$HOME/.codex/.tmp/plugins"
-skills_manifest="$HOME/.codex/skills.manifest.json"
-skills_dir="$HOME/.codex/skills"
-skills_sync_root="$HOME/.codex/.tmp/skill-sync"
-
-update_plugins() {
-  if [ -d "$plugins_repo/.git" ]; then
-    before="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
-    if git -C "$plugins_repo" pull --ff-only --quiet >/dev/null 2>&1; then
-      after="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
-      if [ -n "$before" ] && [ "$before" = "$after" ]; then
-        echo "[INFO] 插件镜像已是最新版本：$after。"
-      else
-        echo "[OK] 插件镜像已更新：${before:-unknown} -> ${after:-unknown}。"
-      fi
-      return 0
-    fi
-    echo '[WARN] 插件镜像更新失败，将继续启动 Codex。'
-    return 0
-  fi
-
-  echo "[WARN] 未找到插件镜像仓库：$plugins_repo，跳过插件更新。"
-  return 0
-}
-
-update_skills() {
-  if [ -f "$skills_manifest" ]; then
-    mkdir -p "$skills_dir" "$skills_sync_root"
-    echo "[INFO] 开始刷新本地 skills：$skills_dir。"
-
-    python3 - "$skills_manifest" "$skills_dir" "$skills_sync_root" <<'PY'
-import json
-import shutil
-import subprocess
-import sys
-from pathlib import Path
-
-manifest_path = Path(sys.argv[1])
-skills_dir = Path(sys.argv[2])
-sync_root = Path(sys.argv[3])
-
-def info(message):
-    print(f'[INFO] {message}')
-
-def ok(message):
-    print(f'[OK] {message}')
-
-def warn(message):
-    print(f'[WARN] {message}')
-
-try:
-    manifest = json.loads(manifest_path.read_text())
-except Exception as exc:
-    warn(f'无法读取 skills manifest：{exc}')
-    sys.exit(0)
-
-skills = [
-    skill for skill in manifest.get('skills', [])
-    if skill is not None and (skill.get('enabled') is None or bool(skill.get('enabled')))
-]
-if not skills:
-    info('skills manifest 为空，跳过。')
-    sys.exit(0)
-
-sources = {}
-for skill in skills:
-    name = skill.get('name')
-    source_id = skill.get('sourceId')
-    source_path = skill.get('sourcePath')
-    if not name or not source_id or not source_path:
-        warn('skills manifest 中存在缺少 name/sourceId/sourcePath 的条目，跳过。')
-        sys.exit(0)
-    if source_id not in sources:
-        source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
-        if not source or not source.get('repo'):
-            warn(f'Source 缺少 repo：{source_id}')
-            sys.exit(0)
-        sources[source_id] = source
-
-sync_root.mkdir(parents=True, exist_ok=True)
-skills_dir.mkdir(parents=True, exist_ok=True)
-
-for source_id, source in sorted(sources.items()):
-    checkout_dir = sync_root / source_id
-    if checkout_dir.exists():
-        shutil.rmtree(checkout_dir)
-    repo = source['repo']
-    cmd = ['git', 'clone', '--depth', '1']
-    ref = source.get('ref')
-    if ref:
-        cmd.extend(['--branch', str(ref)])
-    cmd.extend([repo, str(checkout_dir)])
-    subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if not checkout_dir.exists():
-        warn(f'克隆 skills 源失败：{source_id}')
-        sys.exit(0)
-
-for skill in skills:
-    source_id = skill['sourceId']
-    source_path = skill['sourcePath']
-    name = skill['name']
-    checkout_dir = sync_root / source_id
-    source_dir = checkout_dir / source_path
-    dest_dir = skills_dir / name
-
-    if not source_dir.exists():
-        warn(f'找不到技能源：{source_id}/{source_path}')
-        sys.exit(0)
-
-    if dest_dir.exists():
-        shutil.rmtree(dest_dir)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    if source_path == '.':
-        subprocess.run(
-            ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    else:
-        subprocess.run(
-            ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-ok(f'已刷新 {len(skills)} 个 skills。')
-PY
-    return 0
-  fi
-
-  echo "[WARN] 未找到 skills manifest：$skills_manifest，跳过 skills 更新。"
-  return 0
-}
-
-sync_update_artifacts() {
-  if should_check_update; then
-    update_codex
-    update_plugins
-    update_skills
-    touch_update_stamp
-  fi
-}
-
-check_subscription() {
-  python3 - <<'PY'
-import base64
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-auth_path = Path.home() / '.codex' / 'auth.json'
-
-def warn(message):
-    print(f'[WARN] {message}')
-
-def info(message):
-    print(f'[INFO] {message}')
-
-if not auth_path.exists():
-    warn('未找到 Codex 登录信息，跳过订阅检查。')
-    sys.exit(0)
-
-try:
-    auth = json.loads(auth_path.read_text())
-except Exception as exc:
-    warn(f'无法读取 Codex 登录信息：{exc}')
-    sys.exit(0)
-
-if auth.get('auth_mode') != 'chatgpt':
-    info('当前不是 ChatGPT 登录，跳过订阅检查。')
-    sys.exit(0)
-
-tokens = auth.get('tokens') or {}
-
-def decode_jwt(token):
-    parts = token.split('.')
-    if len(parts) < 2:
-        return {}
-    payload = parts[1] + '=' * (-len(parts[1]) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload.encode('ascii')))
-
-def extract_subscription(payload):
-    nested = payload.get('https://api.openai.com/auth')
-    if isinstance(nested, dict):
-        value = nested.get('chatgpt_subscription_active_until')
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-subscription_until = None
-for token_name in ('id_token', 'access_token'):
-    token = tokens.get(token_name)
-    if not isinstance(token, str) or not token.strip():
-        continue
-    try:
-        payload = decode_jwt(token)
-    except Exception:
-        continue
-    subscription_until = extract_subscription(payload)
-    if subscription_until:
-        break
-
-if not subscription_until:
-    warn('未找到订阅到期时间，跳过检查。')
-    sys.exit(0)
-
-normalized_until = subscription_until.replace('Z', '+00:00')
-try:
-    expiry = datetime.fromisoformat(normalized_until)
-except ValueError:
-    warn(f'无法解析订阅到期时间：{subscription_until}')
-    sys.exit(0)
-
-now = datetime.now(timezone.utc)
-remaining = expiry - now
-remaining_days = remaining.total_seconds() / 86400
-expiry_text = expiry.astimezone(timezone.utc).isoformat()
-
-if remaining.total_seconds() <= 0:
-    warn(f'Codex 订阅已过期，到期时间：{expiry_text}。')
-    sys.exit(0)
-
-if remaining_days <= 7:
-    warn(f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：{expiry_text}。')
-    sys.exit(0)
-
-info(f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：{expiry_text}。')
-PY
-}
-
-touch_update_stamp() {
-  mkdir -p "$HOME/.codex"
-  date +%F > "$update_stamp"
-}
-
-should_check_update() {
-  local today current
-  today="$(date +%F)"
-  current="$(cat "$update_stamp" 2>/dev/null || true)"
-  if [ "$current" = "$today" ]; then
-    echo '[INFO] 今天已检查过 Codex / skills / plugin 检查，跳过。'
-    return 1
-  fi
-  return 0
-}
-
-update_codex() {
-  if ! command -v npm >/dev/null 2>&1; then
-    echo '[WARN] 未找到 npm，跳过 Codex 更新。'
-    touch_update_stamp
-    return 0
-  fi
-
-  if ! should_check_update; then
-    return 0
-  fi
-
-  if [ ! -x "$real_codex" ]; then
-    echo '[INFO] 未检测到已安装的 Codex，开始安装最新版本。'
-    mkdir -p "$codex_prefix"
-    if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
-      echo '[OK] Codex 已安装。'
-    else
-      echo '[WARN] Codex 安装失败，将继续使用当前版本。'
-    fi
-    touch_update_stamp
-    return 0
-  fi
-
-  current_version="$($real_codex --version 2>/dev/null | awk '{print $NF}')"
-  latest_version="$(npm view @openai/codex version --silent 2>/dev/null || true)"
-
-  if [ -z "$latest_version" ]; then
-    echo '[WARN] 无法获取 Codex 最新版本，跳过自动更新。'
-    touch_update_stamp
-    return 0
-  fi
-
-  if [ "$current_version" = "$latest_version" ]; then
-    echo "[INFO] Codex 已是最新版本：$current_version。"
-    touch_update_stamp
-    return 0
-  fi
-
-  echo "[INFO] 检测到 Codex 新版本：$current_version -> $latest_version，开始更新。"
-  mkdir -p "$codex_prefix"
-  if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
-    echo "[OK] Codex 已更新到最新版本：$latest_version。"
-  else
-    echo '[WARN] Codex 更新失败，将继续使用当前版本。'
-  fi
-  touch_update_stamp
-}
-
-check_subscription
-sync_update_artifacts
-if [ -x "$real_codex" ]; then
-  :
-elif [ -x "/usr/local/bin/codex" ]; then
-  real_codex="/usr/local/bin/codex"
-fi
-
-exec "$real_codex" "$@"
-EOF_WRAPPER
-chmod +x "$HOME/.local/bin/codex"
-'@
-
-    Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
+    Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-wrapper' | Out-Null
     Write-Ok '已安装 Codex 自动更新包装器。'
 }
 
@@ -1081,82 +716,7 @@ function Ensure-CodexDefaultModel {
     )
 
     Write-Section "为 $LinuxUser 写入 Codex 默认模型"
-
-    $userScript = @'
-set -euo pipefail
-mkdir -p "$HOME/.codex"
-config="$HOME/.codex/config.toml"
-tmp="$(mktemp)"
-status="$(
-python3 - "$config" "$tmp" <<'PY'
-import re
-import sys
-from pathlib import Path
-
-config_path = Path(sys.argv[1])
-tmp_path = Path(sys.argv[2])
-desired_model = 'gpt-5.4-mini'
-desired_effort = 'medium'
-
-text = config_path.read_text() if config_path.exists() else ''
-lines = text.splitlines()
-
-def get_value(key):
-    pattern = re.compile(rf'^\s*{re.escape(key)}\s*=\s*"([^"]*)"')
-    for line in lines:
-        match = pattern.match(line)
-        if match:
-            return match.group(1)
-    return None
-
-current_model = get_value('model')
-current_effort = get_value('model_reasoning_effort')
-
-if current_model == desired_model and current_effort == desired_effort:
-    print('UNCHANGED')
-    sys.exit(0)
-
-def replace_or_prepend(key, value, lines):
-    pattern = re.compile(rf'^\s*{re.escape(key)}\s*=')
-    updated = []
-    replaced = False
-    for line in lines:
-        if pattern.match(line):
-            if not replaced:
-                updated.append(f'{key} = "{value}"')
-                replaced = True
-            continue
-        updated.append(line)
-    if not replaced:
-        updated.insert(0, f'{key} = "{value}"')
-    return updated
-
-lines = replace_or_prepend('model', desired_model, lines)
-lines = replace_or_prepend('model_reasoning_effort', desired_effort, lines)
-
-tmp_path.write_text('\n'.join(lines).rstrip() + '\n')
-print('UPDATED')
-PY
-)"
-
-case "$status" in
-    UNCHANGED)
-        echo 'UNCHANGED'
-        rm -f "$tmp"
-        ;;
-    UPDATED)
-        mv "$tmp" "$config"
-        echo 'UPDATED'
-        ;;
-    *)
-        rm -f "$tmp"
-        echo "ERROR: $status"
-        exit 1
-        ;;
-esac
-'@
-
-    $result = Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript -CaptureOutput
+    $result = Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'ensure-default-model' -CaptureOutput
     if ($result.ExitCode -ne 0) {
         throw '更新 Codex 默认模型失败。'
     }
@@ -1182,146 +742,47 @@ function Check-CodexSubscriptionStatus {
     )
 
     Write-Section "检查 $LinuxUser 的 Codex 订阅状态"
-
-    $userScript = @'
-set -euo pipefail
-python3 - <<'PY'
-import base64
-import json
-import sys
-from datetime import datetime, timezone
-from pathlib import Path
-
-auth_path = Path.home() / '.codex' / 'auth.json'
-
-def emit(payload):
-    print(json.dumps(payload, ensure_ascii=True))
-
-if not auth_path.exists():
-    emit({'status': 'missing_auth'})
-    sys.exit(0)
-
-try:
-    auth = json.loads(auth_path.read_text())
-except Exception as exc:
-    emit({'status': 'read_error', 'message': str(exc)})
-    sys.exit(0)
-
-if auth.get('auth_mode') != 'chatgpt':
-    emit({'status': 'not_chatgpt'})
-    sys.exit(0)
-
-tokens = auth.get('tokens') or {}
-
-def decode_jwt(token: str) -> dict:
-    parts = token.split('.')
-    if len(parts) < 2:
-        return {}
-    payload = parts[1] + '=' * (-len(parts[1]) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload.encode('ascii')))
-
-def extract_subscription(payload):
-    nested = payload.get('https://api.openai.com/auth')
-    if isinstance(nested, dict):
-        value = nested.get('chatgpt_subscription_active_until')
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-subscription_until = None
-for token_name in ('id_token', 'access_token'):
-    token = tokens.get(token_name)
-    if not isinstance(token, str) or not token.strip():
-        continue
-    try:
-        payload = decode_jwt(token)
-    except Exception:
-        continue
-    subscription_until = extract_subscription(payload)
-    if subscription_until:
-        break
-
-if not subscription_until:
-    emit({'status': 'no_expiry'})
-    sys.exit(0)
-
-normalized_until = subscription_until.replace('Z', '+00:00')
-try:
-    expiry = datetime.fromisoformat(normalized_until)
-except ValueError:
-    emit({'status': 'parse_error', 'subscription_until': subscription_until})
-    sys.exit(0)
-
-now = datetime.now(timezone.utc)
-remaining = expiry - now
-remaining_days = remaining.total_seconds() / 86400
-expiry_text = expiry.astimezone(timezone.utc).isoformat()
-
-if remaining.total_seconds() <= 0:
-    emit({'status': 'expired', 'expiry_iso': expiry_text, 'remaining_days': remaining_days})
-    sys.exit(0)
-
-level = 'warning' if remaining_days <= 7 else 'info'
-emit({'status': level, 'expiry_iso': expiry_text, 'remaining_days': remaining_days})
-PY
-'@
-
-    $tempScript = New-TemporaryFile
-    try {
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($tempScript.FullName, $userScript, $utf8NoBom)
-        $tempScriptPath = Convert-ToWslPath -WindowsPath $tempScript.FullName
-
-        $args = @('-d', $TargetDistro)
-        if ($LinuxUser) {
-            $args += @('-u', $LinuxUser)
-        }
-        $args += @('--', 'bash', $tempScriptPath)
-
-        $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList $args -AllowFailure -CaptureOutput
-        if ($result.ExitCode -ne 0) {
-            Write-WarnEx '订阅检查失败，已跳过。'
-            return
-        }
-
-        $jsonText = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
-        if ([string]::IsNullOrWhiteSpace($jsonText)) {
-            Write-WarnEx '未收到订阅检查结果，已跳过。'
-            return
-        }
-
-        try {
-            $payload = $jsonText | ConvertFrom-Json
-        }
-        catch {
-            Write-WarnEx '订阅检查结果解析失败，已跳过。'
-            return
-        }
-
-        switch ($payload.status) {
-            'missing_auth' { Write-WarnEx '未找到 Codex 登录信息，跳过订阅检查。' }
-            'read_error' { Write-WarnEx "无法读取 Codex 登录信息：$($payload.message)" }
-            'not_chatgpt' { Write-Info '当前不是 ChatGPT 登录，跳过订阅检查。' }
-            'no_expiry' { Write-WarnEx '未找到订阅到期时间，跳过检查。' }
-            'parse_error' { Write-WarnEx "无法解析订阅到期时间：$($payload.subscription_until)" }
-            'expired' { Write-WarnEx ("Codex 订阅已过期，到期时间：{0}。" -f $payload.expiry_iso) }
-            'warning' {
-                $days = [double]$payload.remaining_days
-                Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, $payload.expiry_iso)
-            }
-            'info' {
-                $days = [double]$payload.remaining_days
-                Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, $payload.expiry_iso)
-            }
-            default {
-                Write-WarnEx '订阅检查结果未知，已跳过。'
-            }
-        }
+    $result = Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'check-subscription-json' -CaptureOutput
+    if ($result.ExitCode -ne 0) {
+        Write-WarnEx '订阅检查失败，已跳过。'
+        return
     }
-    finally {
-        Remove-Item -LiteralPath $tempScript.FullName -Force -ErrorAction SilentlyContinue
+
+    $jsonText = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
+    if ([string]::IsNullOrWhiteSpace($jsonText)) {
+        Write-WarnEx '未收到订阅检查结果，已跳过。'
+        return
+    }
+
+    try {
+        $payload = $jsonText | ConvertFrom-Json
+    }
+    catch {
+        Write-WarnEx '订阅检查结果解析失败，已跳过。'
+        return
+    }
+
+    switch ($payload.status) {
+        'missing_auth' { Write-WarnEx '未找到 Codex 登录信息，跳过订阅检查。' }
+        'read_error' { Write-WarnEx "无法读取 Codex 登录信息：$($payload.message)" }
+        'not_chatgpt' { Write-Info '当前不是 ChatGPT 登录，跳过订阅检查。' }
+        'no_expiry' { Write-WarnEx '未找到订阅到期时间，跳过检查。' }
+        'parse_error' { Write-WarnEx "无法解析订阅到期时间：$($payload.subscription_until)" }
+        'expired' { Write-WarnEx ("Codex 订阅已过期，到期时间：{0}。" -f $payload.expiry_iso) }
+        'warning' {
+            $days = [double]$payload.remaining_days
+            Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, $payload.expiry_iso)
+        }
+        'info' {
+            $days = [double]$payload.remaining_days
+            Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, $payload.expiry_iso)
+        }
+        default {
+            Write-WarnEx '订阅检查结果未知，已跳过。'
+        }
     }
 }
+
 function Get-SkillManifest {
     $manifestPath = $null
     $manifestUrl = $null
@@ -1410,77 +871,19 @@ function Install-CodexSkills {
         return
     }
 
-
     $manifestJson = $manifest | ConvertTo-Json -Depth 32
-
-    $persistManifest = @'
-set -euo pipefail
-mkdir -p "$HOME/.codex"
-cat > "$HOME/.codex/skills.manifest.json" <<'EOF_MANIFEST'
-__MANIFEST_JSON__
-EOF_MANIFEST
-'@
-    $persistManifest = $persistManifest.Replace('__MANIFEST_JSON__', $manifestJson)
-    Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $persistManifest | Out-Null
-
-    $sourceRoots = @{}
-    foreach ($skill in $skills) {
-        if ([string]::IsNullOrWhiteSpace($skill.name) -or [string]::IsNullOrWhiteSpace($skill.sourceId) -or [string]::IsNullOrWhiteSpace($skill.sourcePath)) {
-            throw '每个技能清单条目都必须包含 `name`、`sourceId` 和 `sourcePath`。'
-        }
-
-        if (-not $sourceRoots.ContainsKey($skill.sourceId)) {
-            $source = Resolve-SourceById -Manifest $manifest -SourceId $skill.sourceId
-            if ($null -eq $source -or [string]::IsNullOrWhiteSpace($source.repo)) {
-                throw "Source '$($skill.sourceId)' is missing a repo URL."
-            }
-            $sourceRoots[$skill.sourceId] = $source
-        }
+    $tempManifest = New-TemporaryFile
+    try {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($tempManifest.FullName, $manifestJson, $utf8NoBom)
+        $wslManifestPath = Convert-ToWslPath -WindowsPath $tempManifest.FullName
+        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'persist-manifest' -Arguments @($wslManifestPath) | Out-Null
+        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-skills' | Out-Null
+    }
+    finally {
+        Remove-Item -LiteralPath $tempManifest.FullName -Force -ErrorAction SilentlyContinue
     }
 
-    $skillDir = '$HOME/.codex/skills'
-    $tempRoot = '/tmp/codex-skill-sources'
-
-    $bash = New-Object System.Collections.Generic.List[string]
-    $bash.Add('set -euo pipefail')
-    $bash.Add("skill_dir=$skillDir")
-    $bash.Add("temp_root=$(ConvertTo-BashSingleQuoted $tempRoot)")
-    $bash.Add('mkdir -p "$temp_root" "$skill_dir"')
-
-    foreach ($sourceId in ($sourceRoots.Keys | Sort-Object)) {
-        $source = $sourceRoots[$sourceId]
-        $checkoutDir = "$tempRoot/$sourceId"
-        $repo = ConvertTo-BashSingleQuoted ([string]$source.repo)
-        $checkout = ConvertTo-BashSingleQuoted $checkoutDir
-        $refValue = $null
-        if ($source.PSObject.Properties.Match('ref').Count -gt 0) {
-            $refValue = [string]$source.ref
-        }
-        $branch = if (-not [string]::IsNullOrWhiteSpace($refValue)) { " --branch $(ConvertTo-BashSingleQuoted $refValue)" } else { '' }
-        $bash.Add("rm -rf $checkout")
-        $bash.Add("git clone --depth 1$branch $repo $checkout")
-    }
-
-    foreach ($skill in $skills) {
-        $checkoutDir = "$tempRoot/$($skill.sourceId)"
-        $sourcePath = [string]$skill.sourcePath
-        $name = [string]$skill.name
-        $dest = '$skill_dir/' + $name
-
-        $bash.Add("rm -rf `"$dest`"")
-        $bash.Add("if [ ! -e $(ConvertTo-BashSingleQuoted "$checkoutDir/$sourcePath") ]; then echo $(ConvertTo-BashSingleQuoted "Missing skill source: $($skill.sourceId)/$sourcePath") >&2; exit 1; fi")
-        $bash.Add("mkdir -p `"$dest`"")
-        if ($sourcePath -eq '.') {
-            $bash.Add("rsync -a --delete --exclude='.git' $(ConvertTo-BashSingleQuoted "$checkoutDir/") `"$dest`"/")
-        }
-        else {
-            $bash.Add("rsync -a --delete $(ConvertTo-BashSingleQuoted "$checkoutDir/$sourcePath/") `"$dest`"/")
-        }
-    }
-
-    $userScript = ($bash -join "`n")
-        Write-Section "为 $LinuxUser 安装 Codex skills"
-    Invoke-WslBash -TargetDistro $TargetDistro -User $LinuxUser -Command $userScript | Out-Null
     Write-Ok '已从上游仓库安装 Codex skills。'
 }
 
