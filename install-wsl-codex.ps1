@@ -957,24 +957,21 @@ from pathlib import Path
 
 auth_path = Path.home() / '.codex' / 'auth.json'
 
-def warn(message: str) -> None:
-    print(f'[WARN] {message}')
-
-def info(message: str) -> None:
-    print(f'[INFO] {message}')
+def emit(payload):
+    print(json.dumps(payload, ensure_ascii=True))
 
 if not auth_path.exists():
-    warn('未找到 Codex 登录信息，跳过订阅检查。')
+    emit({'status': 'missing_auth'})
     sys.exit(0)
 
 try:
     auth = json.loads(auth_path.read_text())
 except Exception as exc:
-    warn(f'无法读取 Codex 登录信息：{exc}')
+    emit({'status': 'read_error', 'message': str(exc)})
     sys.exit(0)
 
 if auth.get('auth_mode') != 'chatgpt':
-    info('当前不是 ChatGPT 登录，跳过订阅检查。')
+    emit({'status': 'not_chatgpt'})
     sys.exit(0)
 
 tokens = auth.get('tokens') or {}
@@ -1008,35 +1005,27 @@ for token_name in ('id_token', 'access_token'):
         break
 
 if not subscription_until:
-    warn('未找到订阅到期时间，跳过检查。')
+    emit({'status': 'no_expiry'})
     sys.exit(0)
 
 normalized_until = subscription_until.replace('Z', '+00:00')
 try:
     expiry = datetime.fromisoformat(normalized_until)
 except ValueError:
-    warn(f'无法解析订阅到期时间：{subscription_until}')
+    emit({'status': 'parse_error', 'subscription_until': subscription_until})
     sys.exit(0)
 
 now = datetime.now(timezone.utc)
 remaining = expiry - now
 remaining_days = remaining.total_seconds() / 86400
+expiry_text = expiry.astimezone(timezone.utc).isoformat()
 
 if remaining.total_seconds() <= 0:
-    warn(f'Codex 订阅已过期，到期时间：{expiry.astimezone(timezone.utc).isoformat()}。')
+    emit({'status': 'expired', 'expiry_iso': expiry_text, 'remaining_days': remaining_days})
     sys.exit(0)
 
-if remaining_days <= 7:
-    warn(
-        f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：'
-        f'{expiry.astimezone(timezone.utc).isoformat()}。'
-    )
-    sys.exit(0)
-
-info(
-    f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：'
-    f'{expiry.astimezone(timezone.utc).isoformat()}。'
-)
+level = 'warning' if remaining_days <= 7 else 'info'
+emit({'status': level, 'expiry_iso': expiry_text, 'remaining_days': remaining_days})
 PY
 '@
 
@@ -1053,9 +1042,42 @@ PY
         $args += @('--', 'bash', $tempScriptPath)
 
         $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList $args -AllowFailure -CaptureOutput
-        foreach ($line in @($result.Output)) {
-            if ($null -ne $line -and -not [string]::IsNullOrWhiteSpace($line.ToString())) {
-                Write-Host $line
+        if ($result.ExitCode -ne 0) {
+            Write-WarnEx '订阅检查失败，已跳过。'
+            return
+        }
+
+        $jsonText = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n").Trim()
+        if ([string]::IsNullOrWhiteSpace($jsonText)) {
+            Write-WarnEx '未收到订阅检查结果，已跳过。'
+            return
+        }
+
+        try {
+            $payload = $jsonText | ConvertFrom-Json
+        }
+        catch {
+            Write-WarnEx '订阅检查结果解析失败，已跳过。'
+            return
+        }
+
+        switch ($payload.status) {
+            'missing_auth' { Write-WarnEx '未找到 Codex 登录信息，跳过订阅检查。' }
+            'read_error' { Write-WarnEx "无法读取 Codex 登录信息：$($payload.message)" }
+            'not_chatgpt' { Write-Info '当前不是 ChatGPT 登录，跳过订阅检查。' }
+            'no_expiry' { Write-WarnEx '未找到订阅到期时间，跳过检查。' }
+            'parse_error' { Write-WarnEx "无法解析订阅到期时间：$($payload.subscription_until)" }
+            'expired' { Write-WarnEx ("Codex 订阅已过期，到期时间：{0}。" -f $payload.expiry_iso) }
+            'warning' {
+                $days = [double]$payload.remaining_days
+                Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, $payload.expiry_iso)
+            }
+            'info' {
+                $days = [double]$payload.remaining_days
+                Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, $payload.expiry_iso)
+            }
+            default {
+                Write-WarnEx '订阅检查结果未知，已跳过。'
             }
         }
     }
@@ -1063,7 +1085,6 @@ PY
         Remove-Item -LiteralPath $tempScript.FullName -Force -ErrorAction SilentlyContinue
     }
 }
-
 function Get-SkillManifest {
     $manifestPath = $null
     $manifestUrl = $null
