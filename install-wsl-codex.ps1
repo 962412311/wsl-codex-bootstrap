@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$Distro = "Ubuntu",
     [switch]$InstallBubblewrap,
     [switch]$SkipAptUpgrade,
@@ -455,11 +455,15 @@ function Ensure-WslVersion2 {
     param([string]$TargetDistro)
 
     Write-Section '确保 WSL 2'
+    $map = Get-DistroVersionMap
+    if ($map.ContainsKey($TargetDistro) -and $map[$TargetDistro] -eq '2') {
+        Write-Ok "$TargetDistro 已经是 WSL 2，跳过切换。"
+        return
+    }
+
     $prereq = Test-Wsl2Prerequisites
     if (-not $prereq.Ready) {
-        Write-WarnEx "$TargetDistro 暂不切换到 WSL 2：$($prereq.Reasons -join '；')"
-        Write-WarnEx '已继续后续安装流程。若需要 WSL 2，请先启用相关 Windows 功能后重试。'
-        return
+        throw "$TargetDistro 暂不切换到 WSL 2：$($prereq.Reasons -join '；')。请先启用相关 Windows 功能和硬件虚拟化后再重新运行脚本。"
     }
 
     Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--set-default-version', '2') -AllowFailure | Out-Null
@@ -1466,10 +1470,6 @@ try {
         else {
             Write-Info '默认 WSL 发行版保持不变。'
         }
-    }
-    $wslPrereq = Test-Wsl2Prerequisites
-    if (-not $wslPrereq.Ready) {
-        throw "当前系统不满足 WSL 2 运行条件：$($wslPrereq.Reasons -join '；')。请先启用相关 Windows 功能和硬件虚拟化后再重新运行脚本。"
     }
 
     Ensure-DistroInitialized -TargetDistro $Distro
