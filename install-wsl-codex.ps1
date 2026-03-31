@@ -301,7 +301,7 @@ function Convert-ToWslVersionObject {
 
 function Get-LatestWslVersion {
     try {
-        $release = Invoke-WebRequest -Uri 'https://github.com/microsoft/WSL/releases/latest' -Headers @{ 'User-Agent' = 'wsl-codex-bootstrap' } -UseBasicParsing -ErrorAction Stop
+        $release = Invoke-WebRequest -Uri 'https://github.com/microsoft/WSL/releases/latest' -Headers @{ 'User-Agent' = 'wsl-codex-bootstrap' } -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
 
         $releaseUri = $null
         if ($release.BaseResponse -and $release.BaseResponse.ResponseUri) {
@@ -489,6 +489,7 @@ function Ensure-WslVersion2 {
 function Update-WslEngine {
     Write-Section '更新 WSL 引擎'
     Write-Info '正在检查并更新 WSL 引擎...'
+    Write-Info '正在读取当前 WSL 版本...'
 
     $versionLines = Get-WslVersionSummary
     if ($versionLines.Count -gt 0) {
@@ -497,6 +498,8 @@ function Update-WslEngine {
             Write-Info "  $line"
         }
     }
+
+    Write-Info '正在读取当前 WSL 状态...'
 
     $statusLines = Get-WslStatusSummary
     if ($statusLines.Count -gt 0) {
@@ -507,6 +510,7 @@ function Update-WslEngine {
     }
 
     $currentVersion = Get-WslInstalledVersion
+    Write-Info '正在检查最新 WSL 版本...'
     $latestVersion = Get-LatestWslVersion
 
     if ([string]::IsNullOrWhiteSpace($currentVersion)) {
@@ -519,6 +523,8 @@ function Update-WslEngine {
         Write-Info '无法读取最新 WSL 版本，跳过更新。'
         return
     }
+
+    Write-Info '最新 WSL 版本检查完成。'
 
     Write-Info "最新 WSL 版本：$latestVersion"
     if (Test-WslVersionIsLatest -CurrentVersion $currentVersion -LatestVersion $latestVersion) {
