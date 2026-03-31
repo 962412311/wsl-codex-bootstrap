@@ -98,6 +98,55 @@ function Invoke-External {
     return [pscustomobject]@{ ExitCode = $code }
 }
 
+function Invoke-ExternalUnicode {
+    param(
+        [Parameter(Mandatory)]
+        [string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [switch]$AllowFailure
+    )
+
+    $stdout = New-TemporaryFile
+    $stderr = New-TemporaryFile
+    try {
+        $argumentString = ($ArgumentList | ForEach-Object {
+            if ($_ -match '\s') {
+                '"' + ($_ -replace '"', '\"') + '"'
+            }
+            else {
+                $_
+            }
+        }) -join ' '
+
+        $process = Start-Process -FilePath $FilePath -ArgumentList $argumentString -NoNewWindow -PassThru -Wait -RedirectStandardOutput $stdout.FullName -RedirectStandardError $stderr.FullName
+        $outputBytes = [System.IO.File]::ReadAllBytes($stdout.FullName)
+        $errorBytes = [System.IO.File]::ReadAllBytes($stderr.FullName)
+        $outputText = [System.Text.Encoding]::Unicode.GetString($outputBytes)
+        $errorText = [System.Text.Encoding]::Unicode.GetString($errorBytes)
+        $combined = @()
+        if (-not [string]::IsNullOrWhiteSpace($outputText)) {
+            $combined += ($outputText -split "`r?`n")
+        }
+        if (-not [string]::IsNullOrWhiteSpace($errorText)) {
+            $combined += ($errorText -split "`r?`n")
+        }
+
+        if (-not $AllowFailure -and $process.ExitCode -ne 0) {
+            throw "Command failed: $FilePath $argumentString`n$($combined | Out-String)"
+        }
+
+        return [pscustomobject]@{
+            Output   = $combined
+            Text     = $outputText
+            Error    = $errorText
+            ExitCode = $process.ExitCode
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stdout.FullName, $stderr.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Convert-ToWslPath {
     param([Parameter(Mandatory)][string]$WindowsPath)
 
@@ -142,14 +191,14 @@ function Register-ResumeSelf {
 }
 
 function Get-WslHelpText {
-    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--help') -AllowFailure -CaptureOutput
-    return ($result.Output | Out-String)
+    $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--help') -AllowFailure
+    return $result.Text
 }
 
 function Test-WslInstallSupported {
     try {
-        $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--install', '--help') -AllowFailure -CaptureOutput
-        return ($result.ExitCode -eq 0 -or (($result.Output | Out-String) -match '--install'))
+        $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--version') -AllowFailure
+        return ($result.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($result.Text))
     }
     catch {
         return $false
@@ -157,21 +206,25 @@ function Test-WslInstallSupported {
 }
 
 function Get-InstalledDistros {
-    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-l', '-q') -AllowFailure -CaptureOutput
+    $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('-l', '-q') -AllowFailure
     if ($result.ExitCode -ne 0) { return @() }
-    return @($result.Output | ForEach-Object { $_.ToString().Trim() } | Where-Object { $_ })
+    return @($result.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
 function Get-DistroVersionMap {
-    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-l', '-v') -AllowFailure -CaptureOutput
+    $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('-l', '-v') -AllowFailure
     $map = @{}
     if ($result.ExitCode -ne 0) { return $map }
-    foreach ($line in $result.Output) {
-        $text = ("$line" -replace "`0", '').Trim()
+    foreach ($line in ($result.Text -split "`r?`n")) {
+        $text = $line.Trim()
         if (-not $text -or $text -match '^(NAME|Windows)') { continue }
         $clean = $text.TrimStart('*').Trim()
-        $parts = $clean -split '\s+'
-        if ($parts.Count -ge 3) {
+        if ($clean -match '^(?<name>.+?)\s+(?<state>Running|Stopped|Installing|Unregistering|Converting)\s+(?<version>\d+)\s*$') {
+            $map[$Matches.name.Trim()] = $Matches.version.Trim()
+            continue
+        }
+        $parts = $clean -split '\s{2,}'
+        if ($parts.Count -ge 2) {
             $map[$parts[0].Trim()] = $parts[-1].Trim()
         }
     }
@@ -179,16 +232,29 @@ function Get-DistroVersionMap {
 }
 
 function Get-DefaultDistro {
-    $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('-l', '-v') -AllowFailure -CaptureOutput
+    $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('-l', '-v') -AllowFailure
     if ($result.ExitCode -ne 0) { return $null }
 
-    $text = (($result.Output | ForEach-Object { $_.ToString() }) -join "`n") -replace "`0", ''
-    $match = [regex]::Match($text, '^\s*\*\s*(.+?)\s{2,}', [System.Text.RegularExpressions.RegexOptions]::Multiline)
-    if ($match.Success) {
-        return $match.Groups[1].Value.Trim()
+    foreach ($line in ($result.Text -split "`r?`n")) {
+        $text = $line.Trim()
+        if ($text -match '^\*\s*(.+?)\s{2,}') {
+            return $Matches[1].Trim()
+        }
     }
 
     return $null
+}
+
+function Get-WslVersionSummary {
+    $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--version') -AllowFailure
+    if ($result.ExitCode -ne 0) { return @() }
+    return @($result.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+}
+
+function Get-WslStatusSummary {
+    $result = Invoke-ExternalUnicode -FilePath 'wsl.exe' -ArgumentList @('--status') -AllowFailure
+    if ($result.ExitCode -ne 0) { return @() }
+    return @($result.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
 function Test-Wsl2Prerequisites {
@@ -343,6 +409,21 @@ function Ensure-WslVersion2 {
 function Update-WslEngine {
     Write-Section '更新 WSL 引擎'
     Write-Info '正在检查并更新 WSL 引擎...'
+    $versionLines = Get-WslVersionSummary
+    if ($versionLines.Count -gt 0) {
+        Write-Info '当前 WSL 版本信息：'
+        foreach ($line in $versionLines) {
+            Write-Info "  $line"
+        }
+    }
+    $statusLines = Get-WslStatusSummary
+    if ($statusLines.Count -gt 0) {
+        Write-Info '当前 WSL 状态信息：'
+        foreach ($line in $statusLines) {
+            Write-Info "  $line"
+        }
+    }
+
     $result = Invoke-External -FilePath 'wsl.exe' -ArgumentList @('--update') -AllowFailure -CaptureOutput
     if ($result.ExitCode -eq 0) {
         Write-Ok 'WSL 引擎更新完成。'
