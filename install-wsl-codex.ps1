@@ -826,19 +826,38 @@ function Check-CodexSubscriptionStatus {
         'not_chatgpt' { Write-Info '当前不是 ChatGPT 登录，跳过订阅检查。' }
         'no_expiry' { Write-WarnEx '未找到订阅到期时间，跳过检查。' }
         'parse_error' { Write-WarnEx "无法解析订阅到期时间：$($payload.subscription_until)" }
-        'expired' { Write-WarnEx ("Codex 订阅已过期，到期时间：{0}。" -f $payload.expiry_iso) }
+        'expired' { Write-WarnEx ("Codex 订阅已过期，到期时间：{0}。" -f (Get-CodexExpiryDisplayText -Payload $payload)) }
         'warning' {
             $days = [double]$payload.remaining_days
-            Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, $payload.expiry_iso)
+            Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, (Get-CodexExpiryDisplayText -Payload $payload))
         }
         'info' {
             $days = [double]$payload.remaining_days
-            Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, $payload.expiry_iso)
+            Write-Info ("Codex 订阅还剩 {0:N1} 天，到期时间：{1}。" -f $days, (Get-CodexExpiryDisplayText -Payload $payload))
         }
         default {
             Write-WarnEx '订阅检查结果未知，已跳过。'
         }
     }
+}
+
+function Get-CodexExpiryDisplayText {
+    param([Parameter(Mandatory)]$Payload)
+
+    if ($null -ne $Payload.expiry_text -and -not [string]::IsNullOrWhiteSpace([string]$Payload.expiry_text)) {
+        return [string]$Payload.expiry_text
+    }
+
+    if ($null -ne $Payload.expiry_iso -and -not [string]::IsNullOrWhiteSpace([string]$Payload.expiry_iso)) {
+        try {
+            return ([datetimeoffset]::Parse([string]$Payload.expiry_iso)).UtcDateTime.ToString('yyyy-MM-dd HH:mm:ss')
+        }
+        catch {
+            return [string]$Payload.expiry_iso
+        }
+    }
+
+    return ''
 }
 
 function Get-SkillManifest {

@@ -347,7 +347,7 @@ except ValueError:
 now = datetime.now(timezone.utc)
 remaining = expiry - now
 remaining_days = remaining.total_seconds() / 86400
-expiry_text = expiry.astimezone(timezone.utc).isoformat()
+expiry_text = expiry.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
 if remaining.total_seconds() <= 0:
     warn(f'Codex 订阅已过期，到期时间：{expiry_text}。')
@@ -598,14 +598,14 @@ except ValueError:
 now = datetime.now(timezone.utc)
 remaining = expiry - now
 remaining_days = remaining.total_seconds() / 86400
-expiry_text = expiry.astimezone(timezone.utc).isoformat()
+expiry_text = expiry.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
 if remaining.total_seconds() <= 0:
-    emit({'status': 'expired', 'expiry_iso': expiry_text, 'remaining_days': remaining_days})
+    emit({'status': 'expired', 'expiry_text': expiry_text, 'remaining_days': remaining_days})
     sys.exit(0)
 
 level = 'warning' if remaining_days <= 7 else 'info'
-emit({'status': level, 'expiry_iso': expiry_text, 'remaining_days': remaining_days})
+emit({'status': level, 'expiry_text': expiry_text, 'remaining_days': remaining_days})
 PY
 }
 
