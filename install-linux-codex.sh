@@ -14,8 +14,54 @@ log_warn() {
 }
 
 ensure_root_home() {
-  export HOME="${HOME:-/root}"
+  local target_user target_home
+
+  target_user="${SUDO_USER:-$(id -un)}"
+  if [ -z "$target_user" ] || [ "$target_user" = 'root' ]; then
+    target_user="$(id -un)"
+  fi
+
+  target_home="$(getent passwd "$target_user" 2>/dev/null | awk -F: 'NR==1 { print $6 }')"
+  if [ -z "$target_home" ]; then
+    target_home="${HOME:-/root}"
+  fi
+
+  export USER="$target_user"
+  export LOGNAME="$target_user"
+  export HOME="$target_home"
   mkdir -p "$HOME"
+}
+
+
+is_wsl() {
+  [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null
+}
+
+write_wsl_home_profile() {
+  if ! is_wsl; then
+    return 0
+  fi
+
+  local tmp
+  tmp="$(mktemp)"
+  cat > "$tmp" <<'EOF_WSL_HOME'
+#!/usr/bin/env sh
+
+if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then
+  _codex_user="$(id -un 2>/dev/null || true)"
+  _codex_home="$(getent passwd "$_codex_user" 2>/dev/null | awk -F: 'NR==1 { print $6 }')"
+  if [ -n "$_codex_user" ] && [ -n "$_codex_home" ] && [ "$HOME" != "$_codex_home" ]; then
+    export USER="$_codex_user"
+    export LOGNAME="$_codex_user"
+    export HOME="$_codex_home"
+  fi
+fi
+
+unset _codex_user _codex_home
+EOF_WSL_HOME
+  sudo install -d -m 0755 /etc/profile.d
+  sudo install -m 0644 "$tmp" /etc/profile.d/99-codex-home.sh
+  rm -f "$tmp"
 }
 
 DEFAULT_SKILLS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
@@ -200,6 +246,26 @@ write_codex_wrapper() {
   cat > "$HOME/.local/bin/codex" <<'EOF_WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
+
+resolve_codex_home() {
+  local target_user target_home
+
+  target_user="${SUDO_USER:-$(id -un)}"
+  if [ -z "$target_user" ] || [ "$target_user" = 'root' ]; then
+    target_user="$(id -un)"
+  fi
+
+  target_home="$(getent passwd "$target_user" 2>/dev/null | awk -F: 'NR==1 { print $6 }')"
+  if [ -z "$target_home" ]; then
+    target_home="${HOME:-/root}"
+  fi
+
+  export USER="$target_user"
+  export LOGNAME="$target_user"
+  export HOME="$target_home"
+}
+
+resolve_codex_home
 
 codex_prefix="$HOME/.codex/npm-global"
 real_codex="$codex_prefix/bin/codex"
@@ -856,6 +922,7 @@ bootstrap() {
   local subscription_json
 
   install_base_packages "$skip_upgrade"
+  write_wsl_home_profile
   install_node_codex
   write_codex_wrapper
   ensure_default_model

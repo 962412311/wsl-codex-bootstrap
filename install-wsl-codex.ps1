@@ -978,12 +978,12 @@ function Launch-CodexInteractive {
     Check-CodexSubscriptionStatus -TargetDistro $TargetDistro -LinuxUser $LinuxUser
 
     Write-Section '启动 Codex'
-    Write-Info '这会在 WSL 的 ~/code 目录中启动 `codex`。'
+    Write-Info '这会在当前 Linux 用户的 code 目录中启动 `codex`。'
     $args = @('-d', $TargetDistro)
     if (-not [string]::IsNullOrWhiteSpace($LinuxUser)) {
         $args += @('-u', $LinuxUser)
     }
-    $args += @('--', 'bash', '-lc', 'cd ~/code && "$HOME/.local/bin/codex"')
+    $args += @('--', 'bash', '-lc', 'home=$(getent passwd "$(id -un)" | cut -d: -f6); [ -n "$home" ] || home="$HOME"; cd "$home/code" && "$home/.local/bin/codex"')
     & wsl.exe @args
 }
 
