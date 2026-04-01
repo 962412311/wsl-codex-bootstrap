@@ -3,9 +3,9 @@
     [object[]]$ForwardArgs
 )
 
-# Version: 1.0.1
+# Version: 1.0.2
 # Update this version every time this script changes.
-$ScriptVersion = '1.0.1'
+$ScriptVersion = '1.0.2'
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -17,6 +17,7 @@ $tempScript = Join-Path $env:TEMP 'install-wsl-codex.ps1'
 $tempLinuxScript = Join-Path $env:TEMP 'install-linux-codex.sh'
 
 Write-Host "[INFO] install.ps1 version $ScriptVersion" -ForegroundColor Gray
+# Test edit: no functional change. apply_patch works.
 
 try {
      $scriptUrl = "https://raw.githubusercontent.com/$repoOwner/$repoName/$bootstrapRef/install-wsl-codex.ps1"

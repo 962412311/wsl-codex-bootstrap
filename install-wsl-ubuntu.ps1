@@ -5,6 +5,8 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Test edit: no functional change.
+
 $UbuntuRootfsUrl = 'https://cloud-images.ubuntu.com/wsl/releases/24.04/current/ubuntu-noble-wsl-amd64-24.04lts.rootfs.tar.gz'
 $MinimumFreeSpaceBytes = 20GB
 

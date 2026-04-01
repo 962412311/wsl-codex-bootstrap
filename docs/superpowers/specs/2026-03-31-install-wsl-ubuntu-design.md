@@ -54,7 +54,7 @@ Create a separate local-only PowerShell script that installs or updates WSL, ins
 - For first-time initialization, report whether Ubuntu is already ready or still needs user setup.
 
 ## Reliability Notes
-- The script must not depend on Codex-related files such as `skills-source.json`.
+- The script must not depend on Codex bootstrap config files.
 - The script must not use any temporary bootstrap state from the Codex installer.
 - The script should reuse existing WSL/Ubuntu installations instead of reinstalling them.
 - Path and encoding handling should avoid the PowerShell 5.1 issues that previously affected the Codex bootstrap script.

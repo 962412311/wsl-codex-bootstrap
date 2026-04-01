@@ -3,15 +3,12 @@
     [switch]$SkipAptUpgrade,
     [switch]$NoAutoLaunchCodex,
     [switch]$SkipHostChecks,
-    [string]$SkillsSourceConfigPath,
-    [string]$SkillsManifestPath,
-    [string]$SkillsManifestUrl,
     [string]$BootstrapRef
 )
 
-# Version: 1.0.1
+# Version: 1.0.3
 # Update this version every time this script changes.
-$ScriptVersion = '1.0.1'
+$ScriptVersion = '1.0.3'
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -23,14 +20,9 @@ $BootstrapRepoName = 'wsl-codex-bootstrap'
 $LinuxInstallerFileName = 'install-linux-codex.sh'
 $LinuxInstallerLocalPath = Join-Path $ScriptRoot $LinuxInstallerFileName
 $script:ResolvedLinuxInstallerPath = $null
-$ConfigPath = if ([string]::IsNullOrWhiteSpace($SkillsSourceConfigPath)) {
-    Join-Path $ScriptRoot 'skills-source.json'
-}
-else {
-    $SkillsSourceConfigPath
-}
 
 Write-Host "[INFO] install-wsl-codex.ps1 version $ScriptVersion" -ForegroundColor Gray
+# Test edit: no functional change.
 
 function Write-Section {
     param([string]$Text)
@@ -863,79 +855,9 @@ function Get-CodexExpiryDisplayText {
     return ''
 }
 
-function Get-SkillManifest {
-    $manifestPath = $null
-    $manifestUrl = $null
-    $usedDefaultManifestUrl = $false
-
-    if (-not [string]::IsNullOrWhiteSpace($ConfigPath) -and (Test-Path $ConfigPath)) {
-        $config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
-        if ($null -ne $config.skillsManifestPath -and -not [string]::IsNullOrWhiteSpace([string]$config.skillsManifestPath)) {
-            $manifestPath = [string]$config.skillsManifestPath
-        }
-        if ($null -ne $config.skillsManifestUrl -and -not [string]::IsNullOrWhiteSpace([string]$config.skillsManifestUrl)) {
-            $manifestUrl = [string]$config.skillsManifestUrl
-        }
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($SkillsManifestPath)) {
-        $manifestPath = $SkillsManifestPath
-        $manifestUrl = $null
-    }
-    elseif (-not [string]::IsNullOrWhiteSpace($SkillsManifestUrl)) {
-        $manifestUrl = $SkillsManifestUrl
-        $manifestPath = $null
-    }
-    elseif ([string]::IsNullOrWhiteSpace($manifestPath) -and [string]::IsNullOrWhiteSpace($manifestUrl)) {
-        $manifestUrl = $DefaultSkillsManifestUrl
-        $usedDefaultManifestUrl = $true
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($manifestPath)) {
-        if (-not [System.IO.Path]::IsPathRooted($manifestPath)) {
-            $manifestPath = Join-Path $ScriptRoot $manifestPath
-        }
-        if (-not (Test-Path $manifestPath)) {
-            Write-WarnEx "Configured skill manifest path was not found: $manifestPath"
-            $manifestPath = $null
-        }
-        else {
-            return (Get-Content -Raw -Path $manifestPath | ConvertFrom-Json)
-        }
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($manifestUrl)) {
-        $tempManifest = Join-Path $env:TEMP 'codex-skills.manifest.json'
-        if ($usedDefaultManifestUrl) {
-            Write-Info '未检测到 skills-source.json，已使用默认技能清单来源。'
-        }
-        Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing -OutFile $tempManifest
-        return (Get-Content -Raw -Path $tempManifest | ConvertFrom-Json)
-    }
-
-    throw '未配置技能清单来源。请设置 skills-source.json，或传入 -SkillsManifestPath / -SkillsManifestUrl。'
-}
-
 function ConvertTo-BashSingleQuoted {
     param([Parameter(Mandatory)][string]$Text)
     return "'" + ($Text -replace "'", "'\''") + "'"
-}
-
-function Resolve-SourceById {
-    param(
-        [Parameter(Mandatory)]
-        [object]$Manifest,
-        [Parameter(Mandatory)]
-        [string]$SourceId
-    )
-
-    foreach ($source in @($Manifest.sources)) {
-        if ($source.id -eq $SourceId) {
-            return $source
-        }
-    }
-
-    throw "Unknown sourceId in manifest: $SourceId"
 }
 
 function Install-CodexSkills {
@@ -944,21 +866,21 @@ function Install-CodexSkills {
         [string]$LinuxUser
     )
 
-    $manifest = Get-SkillManifest
-    $skills = @($manifest.skills | Where-Object { $null -eq $_.enabled -or [bool]$_.enabled })
-    if ($skills.Count -eq 0) {
-        Write-WarnEx '技能清单为空，跳过技能安装。'
-        return
-    }
-
-    $manifestJson = $manifest | ConvertTo-Json -Depth 32
     $tempManifest = New-TemporaryFile
     try {
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($tempManifest.FullName, $manifestJson, $utf8NoBom)
+        Invoke-WebRequest -Uri $DefaultSkillsManifestUrl -UseBasicParsing -OutFile $tempManifest.FullName
+        $manifestText = Get-Content -Raw -Path $tempManifest.FullName
+        if ([string]::IsNullOrWhiteSpace($manifestText) -or -not $manifestText.TrimStart().StartsWith('{')) {
+            Write-WarnEx '下载到的 skills manifest 无效，跳过 skills 安装。'
+            return
+        }
+
         $wslManifestPath = Convert-ToWslPath -WindowsPath $tempManifest.FullName
-        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'persist-manifest' -User $LinuxUser -Arguments @($wslManifestPath) | Out-Null
-        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-skills' -User $LinuxUser | Out-Null
+        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-skills' -User $LinuxUser -Arguments @($wslManifestPath) | Out-Null
+    }
+    catch {
+        Write-WarnEx "未能下载 skills manifest：$DefaultSkillsManifestUrl，跳过 skills 安装。"
+        return
     }
     finally {
         Remove-Item -LiteralPath $tempManifest.FullName -Force -ErrorAction SilentlyContinue

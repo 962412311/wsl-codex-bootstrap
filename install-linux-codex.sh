@@ -73,6 +73,42 @@ EOF_WSL_HOME
 
 DEFAULT_SKILLS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
 
+get_codex_target_triple() {
+  case "$(uname -m)" in
+    x86_64|amd64)
+      printf '%s\n' 'x86_64-unknown-linux-musl'
+      ;;
+    aarch64|arm64)
+      printf '%s\n' 'aarch64-unknown-linux-musl'
+      ;;
+    *)
+      printf '%s\n' "Unsupported architecture: $(uname -m)" >&2
+      return 1
+      ;;
+  esac
+}
+
+get_codex_vendor_path_dir() {
+  local target_triple
+  local package_name
+  target_triple="$(get_codex_target_triple)"
+
+  case "$target_triple" in
+    x86_64-unknown-linux-musl)
+      package_name='@openai/codex-linux-x64'
+      ;;
+    aarch64-unknown-linux-musl)
+      package_name='@openai/codex-linux-arm64'
+      ;;
+    *)
+      printf '%s\n' "Unsupported Codex target triple: $target_triple" >&2
+      return 1
+      ;;
+  esac
+
+  printf '%s\n' "$HOME/.codex/npm-global/lib/node_modules/@openai/codex/node_modules/$package_name/vendor/$target_triple/path"
+}
+
 write_codex_path_file() {
   ensure_root_home
 
@@ -82,6 +118,41 @@ write_codex_path_file() {
 
 codex_local_bin="$HOME/.local/bin"
 codex_npm_bin="$HOME/.codex/npm-global/bin"
+get_codex_target_triple() {
+  case "$(uname -m)" in
+    x86_64|amd64)
+      printf '%s\n' 'x86_64-unknown-linux-musl'
+      ;;
+    aarch64|arm64)
+      printf '%s\n' 'aarch64-unknown-linux-musl'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+get_codex_vendor_path_dir() {
+  local target_triple
+  local package_name
+  target_triple="$(get_codex_target_triple)" || return 1
+
+  case "$target_triple" in
+    x86_64-unknown-linux-musl)
+      package_name='@openai/codex-linux-x64'
+      ;;
+    aarch64-unknown-linux-musl)
+      package_name='@openai/codex-linux-arm64'
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  printf '%s\n' "$HOME/.codex/npm-global/lib/node_modules/@openai/codex/node_modules/$package_name/vendor/$target_triple/path"
+}
+
+codex_vendor_path="$(get_codex_vendor_path_dir)"
 path_entries=""
 
 append_path() {
@@ -100,6 +171,7 @@ append_path() {
 
 append_path "$codex_local_bin"
 append_path "$codex_npm_bin"
+append_path "$codex_vendor_path"
 
 IFS=:
 for segment in $PATH; do
@@ -115,6 +187,16 @@ unset IFS
 
 PATH="$path_entries"
 export PATH
+
+# Prefer the stable apply_patch wrapper, while still allowing direct calls
+# to the session-local shim when it exists.
+apply_patch() {
+  "$HOME/.local/bin/apply_patch" "$@"
+}
+
+applypatch() {
+  apply_patch "$@"
+}
 EOF_PATH
   chmod 0644 "$HOME/.codex/path.sh"
 }
@@ -839,16 +921,38 @@ find_session_apply_patch() {
   return 1
 }
 
+find_stable_apply_patch() {
+  local candidate
+
+  for candidate in "$HOME/.codex/npm-global/lib/node_modules/@openai/codex"/node_modules/@openai/codex-*/vendor/*/codex/codex; do
+    [ -x "$candidate" ] || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+
+  return 1
+}
+
 if target="$(find_session_apply_patch 2>/dev/null)"; then
   exec "$target" "$@"
 fi
 
+if target="$(find_stable_apply_patch 2>/dev/null)"; then
+  exec "$target" "$@"
+fi
+
 printf '%s\n' 'apply_patch: no session-local Codex apply_patch executable found under ~/.codex/tmp/arg0.' >&2
-printf '%s\n' 'Start Codex again so the session-local shim is recreated.' >&2
+printf '%s\n' 'No stable Codex patch binary was found either.' >&2
 exit 1
 EOF_APPLY_PATCH
   chmod +x "$HOME/.local/bin/apply_patch"
   ln -sf "$HOME/.local/bin/apply_patch" "$HOME/.local/bin/applypatch"
+
+  local vendor_path_dir
+  vendor_path_dir="$(get_codex_vendor_path_dir)"
+  mkdir -p "$vendor_path_dir"
+  ln -sf "$HOME/.local/bin/apply_patch" "$vendor_path_dir/apply_patch"
+  ln -sf "$HOME/.local/bin/apply_patch" "$vendor_path_dir/applypatch"
 }
 
 install_skills_from_manifest() {
