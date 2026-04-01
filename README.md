@@ -39,9 +39,19 @@ $tmp = Join-Path $env:TEMP "install.ps1"; (New-Object System.Net.WebClient).Down
 curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-linux-codex.sh | bash -s -- bootstrap
 ```
 
-首次运行安装基础包时可能会提示输入 `sudo` 密码。
+### macOS 直接在线执行
+
+在 macOS 里直接运行下面命令，将 Codex 安装到当前 macOS 用户账号：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-mac-codex.sh | bash -s -- bootstrap
+```
+
+首次运行会自动安装或复用 Homebrew，并配置 `~/.local/bin/codex`、默认模型、订阅检查和 skills 同步。
 
 如果你想固定使用某个 manifest 源，先修改 `skills-source.json`，或者把脚本下载到本地后再传 `-SkillsManifestUrl` / `-SkillsManifestPath`。
+
+首次运行安装基础包时可能会提示输入 `sudo` 密码。
 
 ### 本地执行
 
@@ -86,6 +96,7 @@ skills 清单仓库是 [codex-skills-pack](https://github.com/962412311/codex-sk
 ## 仓库结构
 
 - `install-wsl-codex.ps1` - bootstrap 安装脚本
+- `install-mac-codex.sh` - macOS bootstrap 安装脚本
 - `skills-source.json` - 外部 skills 清单指针
 - `docs/bootstrap-flow.md` - 安装流程说明
 

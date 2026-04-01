@@ -907,4 +907,6 @@ main() {
   esac
 }
 
-main "$@"
+if [ -z "${CODEX_BOOTSTRAP_LIB:-}" ]; then
+  main "$@"
+fi

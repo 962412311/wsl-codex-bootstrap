@@ -39,9 +39,19 @@ Run this inside WSL to install Codex directly into the current Linux user accoun
 curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-linux-codex.sh | bash -s -- bootstrap
 ```
 
-The first run may prompt for `sudo` when it installs base packages.
+### Online one-liner for macOS
+
+Run this on macOS to install Codex into the current macOS user account:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-mac-codex.sh | bash -s -- bootstrap
+```
+
+The first run will install or reuse Homebrew, then configure `~/.local/bin/codex`, the default model, subscription checks, and skills syncing.
 
 If you want to pin a specific manifest source, edit `skills-source.json` first or pass `-SkillsManifestUrl` / `-SkillsManifestPath` after downloading the script locally.
+
+The first run may prompt for `sudo` when it installs base packages.
 
 ### Local checkout
 
@@ -86,6 +96,7 @@ The skills inventory lives in [codex-skills-pack](https://github.com/962412311/c
 ## Repository Layout
 
 - `install-wsl-codex.ps1` - bootstrap installer
+- `install-mac-codex.sh` - macOS bootstrap installer
 - `skills-source.json` - pointer to the external skills manifest
 - `docs/bootstrap-flow.md` - installation flow overview
 
