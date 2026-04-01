@@ -9,6 +9,10 @@
     [string]$BootstrapRef
 )
 
+# Version: 1.0.0
+# Update this version every time this script changes.
+$ScriptVersion = '1.0.0'
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -25,6 +29,8 @@ $ConfigPath = if ([string]::IsNullOrWhiteSpace($SkillsSourceConfigPath)) {
 else {
     $SkillsSourceConfigPath
 }
+
+Write-Host "[INFO] install-wsl-codex.ps1 version $ScriptVersion" -ForegroundColor Gray
 
 function Write-Section {
     param([string]$Text)

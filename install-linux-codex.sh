@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Version: 1.0.0
+# Update this version every time this script changes.
+
 log_info() {
   printf '[INFO] %s\n' "$1"
 }
@@ -12,6 +15,8 @@ log_ok() {
 log_warn() {
   printf '[WARN] %s\n' "$1"
 }
+
+log_info "install-linux-codex.sh version 1.0.0"
 
 ensure_root_home() {
   local target_user target_home
