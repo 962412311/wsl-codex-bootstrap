@@ -983,7 +983,7 @@ function Launch-CodexInteractive {
     if (-not [string]::IsNullOrWhiteSpace($LinuxUser)) {
         $args += @('-u', $LinuxUser)
     }
-    $args += @('--', 'bash', '-lc', 'home=$(getent passwd "$(id -un)" | cut -d: -f6); [ -n "$home" ] || home="$HOME"; cd "$home/code" && "$home/.local/bin/codex"')
+    $args += @('--', 'bash', '-lc', 'mkdir -p "$HOME/code" && cd "$HOME/code" && exec "$HOME/.local/bin/codex"')
     & wsl.exe @args
 }
 
