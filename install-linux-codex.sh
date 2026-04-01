@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Version: 1.0.6
+# Version: 1.0.7
 # Update this version every time this script changes.
 
 log_info() {
@@ -17,7 +17,7 @@ log_warn() {
 }
 
 print_script_version() {
-  printf "[INFO] install-linux-codex.sh version 1.0.6\n" >&2
+  printf "[INFO] install-linux-codex.sh version 1.0.7\n" >&2
 }
 
 ensure_root_home() {
@@ -624,6 +624,7 @@ for skill in skills:
 
 ok(f'已刷新 {installed_count} 个 skills。')
 PY
+}
 update_skills() {
   echo "[INFO] 正在检查 skills 更新。"
   local temp_manifest
