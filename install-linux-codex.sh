@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Version: 1.0.5
+# Version: 1.0.6
 # Update this version every time this script changes.
 
 log_info() {
@@ -17,7 +17,7 @@ log_warn() {
 }
 
 print_script_version() {
-  printf "[INFO] install-linux-codex.sh version 1.0.5\n" >&2
+  printf "[INFO] install-linux-codex.sh version 1.0.6\n" >&2
 }
 
 ensure_root_home() {
@@ -545,19 +545,29 @@ if not skills:
     raise SystemExit('技能清单为空，跳过技能安装。')
 
 sources = {}
+resolved_skills = []
 for skill in skills:
     name = skill.get('name')
     source_id = skill.get('sourceId')
     source_path = skill.get('sourcePath')
     if not name or not source_id or not source_path:
-        raise SystemExit('每个技能清单条目都必须包含 name、sourceId 和 sourcePath。')
+        warn('忽略一个缺少 name、sourceId 或 sourcePath 的 skill 条目。')
+        continue
     if source_id not in sources:
         source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
         if not source or not source.get('repo'):
-            raise SystemExit(f"Source '{source_id}' is missing a repo URL.")
+            warn(f"跳过 skill {name}：source '{source_id}' 缺少 repo URL。")
+            continue
         sources[source_id] = source
+    resolved_skills.append(skill)
+
+skills = resolved_skills
+if not skills:
+    warn('没有可安装的有效 skills，跳过 skills 安装。')
+    sys.exit(0)
 
 info(f'准备安装 {len(skills)} 个 skills，来自 {len(sources)} 个源。')
+installed_count = 0
 for source_id, source in sorted(sources.items()):
     info(f'正在同步 skills 源：{source_id}（{source["repo"]}）。')
     checkout_dir = sync_root / source_id
@@ -568,7 +578,14 @@ for source_id, source in sorted(sources.items()):
     if ref:
         cmd.extend(['--branch', str(ref)])
     cmd.extend([source['repo'], str(checkout_dir)])
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as exc:
+        warn(f'同步 skills 源失败，已跳过：{source_id}（{exc}）。')
+        continue
+    if not checkout_dir.exists():
+        warn(f'同步 skills 源后目录不存在，已跳过：{source_id}。')
+        continue
     ok(f'已同步 skills 源：{source_id}。')
 
 info('正在安装 skills 内容。')
@@ -581,25 +598,31 @@ for skill in skills:
     source_dir = checkout_dir / source_path
 
     if not source_dir.exists():
-        raise SystemExit(f"Missing skill source: {skill['sourceId']}/{source_path}")
+        warn(f'跳过 skill {name}：缺少源文件 {skill["sourceId"]}/{source_path}。')
+        continue
 
     if dest_dir.exists():
         shutil.rmtree(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    if source_path == '.':
-        subprocess.run(
-            ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
-            check=True,
-        )
-    else:
-        subprocess.run(
-            ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
-            check=True,
-        )
+    try:
+        if source_path == '.':
+            subprocess.run(
+                ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
+                check=True,
+            )
+    except subprocess.CalledProcessError as exc:
+        warn(f'安装 skill 失败，已跳过：{name}（{exc}）。')
+        continue
+    installed_count += 1
     ok(f'已安装 skill：{name}。')
 
-ok(f'已刷新 {len(skills)} 个 skills。')
+ok(f'已刷新 {installed_count} 个 skills。')
 PY
 update_skills() {
   echo "[INFO] 正在检查 skills 更新。"
@@ -877,6 +900,7 @@ if not skills:
     raise SystemExit('技能清单为空，跳过技能安装。')
 
 sources = {}
+resolved_skills = []
 
 info(f'准备安装 {len(skills)} 个 skills。')
 for skill in skills:
@@ -884,13 +908,22 @@ for skill in skills:
     source_id = skill.get('sourceId')
     source_path = skill.get('sourcePath')
     if not name or not source_id or not source_path:
-        raise SystemExit('每个技能清单条目都必须包含 name、sourceId 和 sourcePath。')
+        warn('忽略一个缺少 name、sourceId 或 sourcePath 的 skill 条目。')
+        continue
     if source_id not in sources:
         source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
         if not source or not source.get('repo'):
-            raise SystemExit(f"Source '{source_id}' is missing a repo URL.")
+            warn(f"跳过 skill {name}：source '{source_id}' 缺少 repo URL。")
+            continue
         sources[source_id] = source
+    resolved_skills.append(skill)
 
+skills = resolved_skills
+if not skills:
+    warn('没有可安装的有效 skills，跳过 skills 安装。')
+    sys.exit(0)
+
+installed_count = 0
 for source_id, source in sorted(sources.items()):
     info(f'正在同步 skills 源：{source_id}（{source["repo"]}）。')
     checkout_dir = sync_root / source_id
@@ -901,7 +934,14 @@ for source_id, source in sorted(sources.items()):
     if ref:
         cmd.extend(['--branch', str(ref)])
     cmd.extend([source['repo'], str(checkout_dir)])
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as exc:
+        warn(f'同步 skills 源失败，已跳过：{source_id}（{exc}）。')
+        continue
+    if not checkout_dir.exists():
+        warn(f'同步 skills 源后目录不存在，已跳过：{source_id}。')
+        continue
     ok(f'已同步 skills 源：{source_id}。')
 
 info('正在安装 skills 内容。')
@@ -913,24 +953,30 @@ for skill in skills:
     source_dir = checkout_dir / source_path
 
     if not source_dir.exists():
-        raise SystemExit(f"Missing skill source: {skill['sourceId']}/{source_path}")
+        warn(f'跳过 skill {skill["name"]}：缺少源文件 {skill["sourceId"]}/{source_path}。')
+        continue
 
     if dest_dir.exists():
         shutil.rmtree(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    if source_path == '.':
-        subprocess.run(
-            ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
-            check=True,
-        )
-    else:
-        subprocess.run(
-            ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
-            check=True,
-        )
+    try:
+        if source_path == '.':
+            subprocess.run(
+                ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
+                check=True,
+            )
+    except subprocess.CalledProcessError as exc:
+        warn(f'安装 skill 失败，已跳过：{skill["name"]}（{exc}）。')
+        continue
+    installed_count += 1
     ok(f'已安装 skill：{skill["name"]}。')
-ok(f'已刷新 {len(skills)} 个 skills。')
+ok(f'已刷新 {installed_count} 个 skills。')
 PY
 }
 
