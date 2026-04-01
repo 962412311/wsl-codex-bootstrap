@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Version: 1.0.3
+# Version: 1.0.5
 # Update this version every time this script changes.
 
 log_info() {
@@ -17,7 +17,7 @@ log_warn() {
 }
 
 print_script_version() {
-  printf "[INFO] install-linux-codex.sh version 1.0.3\n" >&2
+  printf "[INFO] install-linux-codex.sh version 1.0.5\n" >&2
 }
 
 ensure_root_home() {
@@ -218,6 +218,7 @@ install_node_codex() {
   mkdir -p "$HOME/.local/bin" "$HOME/code" "$codex_prefix"
 
   write_codex_path_file
+  write_apply_patch_wrapper
   ensure_codex_shell_hook "$HOME/.bashrc"
   ensure_codex_shell_hook "$HOME/.profile"
   ensure_codex_shell_hook "$HOME/.bash_profile"
@@ -278,7 +279,6 @@ codex_prefix="$HOME/.codex/npm-global"
 real_codex="$codex_prefix/bin/codex"
 update_stamp="$HOME/.codex/.codex-update-check.date"
 plugins_repo="$HOME/.codex/.tmp/plugins"
-skills_manifest="$HOME/.codex/skills.manifest.json"
 skills_dir="$HOME/.codex/skills"
 skills_sync_root="$HOME/.codex/.tmp/skill-sync"
 
@@ -304,11 +304,205 @@ update_plugins() {
 }
 
 update_skills() {
-  if [ -f "$skills_manifest" ]; then
-    echo "[INFO] 正在检查 skills 更新。"
-    mkdir -p "$skills_dir" "$skills_sync_root"
+  echo "[INFO] 正在检查 skills 更新。"
+  local temp_manifest
+  temp_manifest="$(mktemp)"
+  if curl -fsSL "$DEFAULT_SKILLS_MANIFEST_URL" -o "$temp_manifest"; then
+    if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
+      install_skills_from_manifest "$temp_manifest"
+    else
+      echo "[WARN] 下载到的 skills manifest 无效：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 更新。"
+    fi
+  else
+    echo "[WARN] 未能下载 skills manifest：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 更新。"
+  fi
+  rm -f "$temp_manifest"
+  return 0
+}
 
-    python3 - "$skills_manifest" "$skills_dir" "$skills_sync_root" <<'PY'
+check_subscription() {
+  python3 - <<'PY'
+import base64
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+auth_path = Path.home() / '.codex' / 'auth.json'
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+def info(message):
+    print(f'[INFO] {message}')
+
+if not auth_path.exists():
+    warn('未找到 Codex 登录信息，跳过订阅检查。')
+    sys.exit(0)
+
+try:
+    auth_text = auth_path.read_text().strip()
+    if not auth_text:
+        raise ValueError('auth.json is empty')
+    auth = json.loads(auth_text)
+except Exception as exc:
+    warn(f'无法读取 Codex 登录信息：{exc}')
+    sys.exit(0)
+
+if auth.get('auth_mode') != 'chatgpt':
+    info('当前不是 ChatGPT 登录，跳过订阅检查。')
+    sys.exit(0)
+
+tokens = auth.get('tokens') or {}
+
+def decode_jwt(token):
+    parts = token.split('.')
+    if len(parts) < 2:
+        return {}
+    payload = parts[1] + '=' * (-len(parts[1]) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload.encode('ascii')))
+
+def extract_subscription(payload):
+    nested = payload.get('https://api.openai.com/auth')
+    if isinstance(nested, dict):
+        value = nested.get('chatgpt_subscription_active_until')
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+subscription_until = None
+for token_name in ('id_token', 'access_token'):
+    token = tokens.get(token_name)
+    if not isinstance(token, str) or not token.strip():
+        continue
+    try:
+        payload = decode_jwt(token)
+    except Exception:
+        continue
+    subscription_until = extract_subscription(payload)
+    if subscription_until:
+        break
+
+if not subscription_until:
+    warn('未找到订阅到期时间，跳过检查。')
+    sys.exit(0)
+
+normalized_until = subscription_until.replace('Z', '+00:00')
+try:
+    expiry = datetime.fromisoformat(normalized_until)
+except ValueError:
+    warn(f'无法解析订阅到期时间：{subscription_until}')
+    sys.exit(0)
+
+now = datetime.now(timezone.utc)
+remaining = expiry - now
+remaining_days = remaining.total_seconds() / 86400
+expiry_text = expiry.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+if remaining.total_seconds() <= 0:
+    warn(f'Codex 订阅已过期，到期时间：{expiry_text}。')
+    sys.exit(0)
+
+if remaining_days <= 7:
+    warn(f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：{expiry_text}。')
+    sys.exit(0)
+
+info(f'Codex 订阅还剩 {remaining_days:.1f} 天，到期时间：{expiry_text}。')
+PY
+}
+
+touch_update_stamp() {
+  mkdir -p "$HOME/.codex"
+  date +%F > "$update_stamp"
+}
+
+should_check_update() {
+  local today current
+  today="$(date +%F)"
+  current="$(cat "$update_stamp" 2>/dev/null || true)"
+  if [ "$current" = "$today" ]; then
+    echo '[INFO] 今天已检查过 Codex / skills / plugin 检查，跳过。'
+    return 1
+  fi
+  return 0
+}
+
+update_codex() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo '[WARN] 未找到 npm，跳过 Codex 更新。'
+    touch_update_stamp
+    return 0
+  fi
+
+  if ! should_check_update; then
+    return 0
+  fi
+
+  if [ ! -x "$real_codex" ]; then
+    echo '[INFO] 未检测到已安装的 Codex，开始安装最新版本。'
+    mkdir -p "$codex_prefix"
+    if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
+      echo '[OK] Codex 已安装。'
+    else
+      echo '[WARN] Codex 安装失败，将继续使用当前版本。'
+    fi
+    touch_update_stamp
+    return 0
+  fi
+
+  current_version="$($real_codex --version 2>/dev/null | awk '{print $NF}')"
+  latest_version="$(npm view @openai/codex version --silent 2>/dev/null || true)"
+
+  if [ -z "$latest_version" ]; then
+    echo '[WARN] 无法获取 Codex 最新版本，跳过自动更新。'
+    touch_update_stamp
+    return 0
+  fi
+
+  if [ "$current_version" = "$latest_version" ]; then
+    echo "[INFO] Codex 已是最新版本：$current_version。"
+    touch_update_stamp
+    return 0
+  fi
+
+  echo "[INFO] 检测到 Codex 新版本：$current_version -> $latest_version，开始更新。"
+  mkdir -p "$codex_prefix"
+  if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
+    echo "[OK] Codex 已更新到最新版本：$latest_version。"
+  else
+    echo '[WARN] Codex 更新失败，将继续使用当前版本。'
+  fi
+  touch_update_stamp
+}
+
+sync_update_artifacts() {
+  if should_check_update; then
+    update_codex
+    update_plugins
+    update_skills
+    touch_update_stamp
+  fi
+}
+
+check_subscription
+sync_update_artifacts
+if [ -x "$real_codex" ]; then
+  :
+elif [ -x "/usr/local/bin/codex" ]; then
+  real_codex="/usr/local/bin/codex"
+fi
+
+exec "$real_codex" "$@"
+
+install_skills_from_manifest() {
+  ensure_root_home
+
+  local manifest_path="$1"
+  local skills_dir="$HOME/.codex/skills"
+  local skills_sync_root="$HOME/.codex/.tmp/skill-sync"
+
+  mkdir -p "$skills_dir" "$skills_sync_root"
+  python3 - "$manifest_path" "$skills_dir" "$skills_sync_root" <<'PY'
 import json
 import shutil
 import subprocess
@@ -328,13 +522,19 @@ def ok(message):
 def warn(message):
     print(f'[WARN] {message}')
 
+if not manifest_path.exists():
+    print('skills manifest 不存在，跳过技能安装。')
+    sys.exit(0)
+
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('skills manifest 为空，跳过技能安装。')
+    sys.exit(0)
+
 try:
-    manifest_text = manifest_path.read_text().strip()
-    if not manifest_text:
-        raise ValueError('skills manifest is empty')
     manifest = json.loads(manifest_text)
 except Exception as exc:
-    warn(f'无法读取 skills manifest：{exc}')
+    print(f'无法读取 skills manifest：{exc}')
     sys.exit(0)
 
 skills = [
@@ -342,10 +542,7 @@ skills = [
     if skill is not None and (skill.get('enabled') is None or bool(skill.get('enabled')))
 ]
 if not skills:
-    info('skills manifest 为空，跳过。')
-    sys.exit(0)
-
-info(f'准备安装 {len(skills)} 个 skills。')
+    raise SystemExit('技能清单为空，跳过技能安装。')
 
 sources = {}
 for skill in skills:
@@ -353,47 +550,38 @@ for skill in skills:
     source_id = skill.get('sourceId')
     source_path = skill.get('sourcePath')
     if not name or not source_id or not source_path:
-        warn('skills manifest 中存在缺少 name/sourceId/sourcePath 的条目，跳过。')
-        sys.exit(0)
+        raise SystemExit('每个技能清单条目都必须包含 name、sourceId 和 sourcePath。')
     if source_id not in sources:
         source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
         if not source or not source.get('repo'):
-            warn(f'Source 缺少 repo：{source_id}')
-            sys.exit(0)
+            raise SystemExit(f"Source '{source_id}' is missing a repo URL.")
         sources[source_id] = source
 
-sync_root.mkdir(parents=True, exist_ok=True)
-skills_dir.mkdir(parents=True, exist_ok=True)
-
+info(f'准备安装 {len(skills)} 个 skills，来自 {len(sources)} 个源。')
 for source_id, source in sorted(sources.items()):
-    info(f'正在同步 skills 源：{source_id}。')
+    info(f'正在同步 skills 源：{source_id}（{source["repo"]}）。')
     checkout_dir = sync_root / source_id
     if checkout_dir.exists():
         shutil.rmtree(checkout_dir)
-    repo = source['repo']
     cmd = ['git', 'clone', '--depth', '1']
     ref = source.get('ref')
     if ref:
         cmd.extend(['--branch', str(ref)])
-    cmd.extend([repo, str(checkout_dir)])
-    subprocess.run(cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if not checkout_dir.exists():
-        warn(f'克隆 skills 源失败：{source_id}')
-        sys.exit(0)
+    cmd.extend([source['repo'], str(checkout_dir)])
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     ok(f'已同步 skills 源：{source_id}。')
 
 info('正在安装 skills 内容。')
 for skill in skills:
-    source_id = skill['sourceId']
-    source_path = skill['sourcePath']
     name = skill['name']
-    checkout_dir = sync_root / source_id
-    source_dir = checkout_dir / source_path
+    info(f'正在安装 skill：{name}。')
+    checkout_dir = sync_root / skill['sourceId']
+    source_path = skill['sourcePath']
     dest_dir = skills_dir / name
+    source_dir = checkout_dir / source_path
 
     if not source_dir.exists():
-        warn(f'找不到技能源：{source_id}/{source_path}')
-        sys.exit(0)
+        raise SystemExit(f"Missing skill source: {skill['sourceId']}/{source_path}")
 
     if dest_dir.exists():
         shutil.rmtree(dest_dir)
@@ -401,26 +589,32 @@ for skill in skills:
 
     if source_path == '.':
         subprocess.run(
-            ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/']
-,
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
+            check=True,
         )
     else:
         subprocess.run(
             ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            check=True,
         )
+    ok(f'已安装 skill：{name}。')
 
 ok(f'已刷新 {len(skills)} 个 skills。')
 PY
-    return 0
+update_skills() {
+  echo "[INFO] 正在检查 skills 更新。"
+  local temp_manifest
+  temp_manifest="$(mktemp)"
+  if curl -fsSL "$DEFAULT_SKILLS_MANIFEST_URL" -o "$temp_manifest"; then
+    if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
+      install_skills_from_manifest "$temp_manifest"
+    else
+      echo "[WARN] 下载到的 skills manifest 无效：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 更新。"
+    fi
+  else
+    echo "[WARN] 未能下载 skills manifest：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 更新。"
   fi
-
-  echo "[WARN] 未找到 skills manifest：$skills_manifest，跳过 skills 更新。"
+  rm -f "$temp_manifest"
   return 0
 }
 
@@ -599,6 +793,162 @@ fi
 exec "$real_codex" "$@"
 EOF_WRAPPER
   chmod +x "$HOME/.local/bin/codex"
+}
+
+write_apply_patch_wrapper() {
+  ensure_root_home
+
+  mkdir -p "$HOME/.local/bin"
+  cat > "$HOME/.local/bin/apply_patch" <<'EOF_APPLY_PATCH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+find_session_apply_patch() {
+  local candidate
+
+  shopt -s nullglob
+  for candidate in "$HOME/.codex/tmp/arg0"/codex-arg0*/apply_patch "$HOME/.codex/tmp/arg0"/codex-arg0*/applypatch; do
+    [ -x "$candidate" ] || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+if target="$(find_session_apply_patch 2>/dev/null)"; then
+  exec "$target" "$@"
+fi
+
+printf '%s\n' 'apply_patch: no session-local Codex apply_patch executable found under ~/.codex/tmp/arg0.' >&2
+printf '%s\n' 'Start Codex again so the session-local shim is recreated.' >&2
+exit 1
+EOF_APPLY_PATCH
+  chmod +x "$HOME/.local/bin/apply_patch"
+  ln -sf "$HOME/.local/bin/apply_patch" "$HOME/.local/bin/applypatch"
+}
+
+install_skills_from_manifest() {
+  ensure_root_home
+
+  local manifest_path="$1"
+  local skills_dir="$HOME/.codex/skills"
+  local skills_sync_root="$HOME/.codex/.tmp/skill-sync"
+
+  mkdir -p "$skills_dir" "$skills_sync_root"
+  python3 - "$manifest_path" "$skills_dir" "$skills_sync_root" <<'PY'
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+skills_dir = Path(sys.argv[2])
+sync_root = Path(sys.argv[3])
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+if not manifest_path.exists():
+    print('skills manifest 不存在，跳过技能安装。')
+    sys.exit(0)
+
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('skills manifest 为空，跳过技能安装。')
+    sys.exit(0)
+
+try:
+    manifest = json.loads(manifest_text)
+except Exception as exc:
+    print(f'无法读取 skills manifest：{exc}')
+    sys.exit(0)
+skills = [
+    skill for skill in manifest.get('skills', [])
+    if skill is not None and (skill.get('enabled') is None or bool(skill.get('enabled')))
+]
+if not skills:
+    raise SystemExit('技能清单为空，跳过技能安装。')
+
+sources = {}
+
+info(f'准备安装 {len(skills)} 个 skills。')
+for skill in skills:
+    name = skill.get('name')
+    source_id = skill.get('sourceId')
+    source_path = skill.get('sourcePath')
+    if not name or not source_id or not source_path:
+        raise SystemExit('每个技能清单条目都必须包含 name、sourceId 和 sourcePath。')
+    if source_id not in sources:
+        source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
+        if not source or not source.get('repo'):
+            raise SystemExit(f"Source '{source_id}' is missing a repo URL.")
+        sources[source_id] = source
+
+for source_id, source in sorted(sources.items()):
+    info(f'正在同步 skills 源：{source_id}（{source["repo"]}）。')
+    checkout_dir = sync_root / source_id
+    if checkout_dir.exists():
+        shutil.rmtree(checkout_dir)
+    cmd = ['git', 'clone', '--depth', '1']
+    ref = source.get('ref')
+    if ref:
+        cmd.extend(['--branch', str(ref)])
+    cmd.extend([source['repo'], str(checkout_dir)])
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ok(f'已同步 skills 源：{source_id}。')
+
+info('正在安装 skills 内容。')
+for skill in skills:
+    info(f'正在安装 skill：{skill["name"]}。')
+    checkout_dir = sync_root / skill['sourceId']
+    source_path = skill['sourcePath']
+    dest_dir = skills_dir / skill['name']
+    source_dir = checkout_dir / source_path
+
+    if not source_dir.exists():
+        raise SystemExit(f"Missing skill source: {skill['sourceId']}/{source_path}")
+
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if source_path == '.':
+        subprocess.run(
+            ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
+            check=True,
+        )
+    else:
+        subprocess.run(
+            ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
+            check=True,
+        )
+    ok(f'已安装 skill：{skill["name"]}。')
+ok(f'已刷新 {len(skills)} 个 skills。')
+PY
+}
+
+update_skills() {
+  echo "[INFO] 正在检查 skills 更新。"
+  local temp_manifest
+  temp_manifest="$(mktemp)"
+  if curl -fsSL "$DEFAULT_SKILLS_MANIFEST_URL" -o "$temp_manifest"; then
+    if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
+      install_skills_from_manifest "$temp_manifest"
+    else
+      echo "[WARN] 下载到的 skills manifest 无效：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 更新。"
+    fi
+  else
+    echo "[WARN] 未能下载 skills manifest：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 更新。"
+  fi
+  rm -f "$temp_manifest"
+  return 0
 }
 
 ensure_default_model() {
@@ -813,118 +1163,9 @@ else:
 PY
 }
 
-persist_manifest() {
-  ensure_root_home
-
-  local source_path="$1"
-  mkdir -p "$HOME/.codex"
-  install -m 0644 "$source_path" "$HOME/.codex/skills.manifest.json"
-}
-
-install_skills() {
-  ensure_root_home
-
-  local skills_manifest="$HOME/.codex/skills.manifest.json"
-  local skills_dir="$HOME/.codex/skills"
-  local skills_sync_root="$HOME/.codex/.tmp/skill-sync"
-
-  mkdir -p "$skills_dir" "$skills_sync_root"
-  python3 - "$skills_manifest" "$skills_dir" "$skills_sync_root" <<'PY'
-import json
-import shutil
-import subprocess
-import sys
-from pathlib import Path
-
-manifest_path = Path(sys.argv[1])
-skills_dir = Path(sys.argv[2])
-sync_root = Path(sys.argv[3])
-
-def info(message):
-    print(f'[INFO] {message}')
-
-def ok(message):
-    print(f'[OK] {message}')
-
-def warn(message):
-    print(f'[WARN] {message}')
-
-if not manifest_path.exists():
-    print('skills manifest 不存在，跳过技能安装。')
-    sys.exit(0)
-
-manifest_text = manifest_path.read_text().strip()
-if not manifest_text:
-    print('skills manifest 为空，跳过技能安装。')
-    sys.exit(0)
-
-try:
-    manifest = json.loads(manifest_text)
-except Exception as exc:
-    print(f'无法读取 skills manifest：{exc}')
-    sys.exit(0)
-skills = [
-    skill for skill in manifest.get('skills', [])
-    if skill is not None and (skill.get('enabled') is None or bool(skill.get('enabled')))
-]
-if not skills:
-    raise SystemExit('技能清单为空，跳过技能安装。')
-
-sources = {}
-for skill in skills:
-    name = skill.get('name')
-    source_id = skill.get('sourceId')
-    source_path = skill.get('sourcePath')
-    if not name or not source_id or not source_path:
-        raise SystemExit('每个技能清单条目都必须包含 name、sourceId 和 sourcePath。')
-    if source_id not in sources:
-        source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
-        if not source or not source.get('repo'):
-            raise SystemExit(f"Source '{source_id}' is missing a repo URL.")
-        sources[source_id] = source
-
-for source_id, source in sorted(sources.items()):
-    info(f'正在同步 skills 源：{source_id}。')
-    checkout_dir = sync_root / source_id
-    if checkout_dir.exists():
-        shutil.rmtree(checkout_dir)
-    cmd = ['git', 'clone', '--depth', '1']
-    ref = source.get('ref')
-    if ref:
-        cmd.extend(['--branch', str(ref)])
-    cmd.extend([source['repo'], str(checkout_dir)])
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-for skill in skills:
-    checkout_dir = sync_root / skill['sourceId']
-    source_path = skill['sourcePath']
-    dest_dir = skills_dir / skill['name']
-    source_dir = checkout_dir / source_path
-
-    if not source_dir.exists():
-        raise SystemExit(f"Missing skill source: {skill['sourceId']}/{source_path}")
-
-    if dest_dir.exists():
-        shutil.rmtree(dest_dir)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    if source_path == '.':
-        subprocess.run(
-            ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/']
-,
-            check=True,
-        )
-    else:
-        subprocess.run(
-            ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
-            check=True,
-        )
-PY
-}
 
 bootstrap() {
   local skip_upgrade="${1:-0}"
-  local manifest_url="${2:-$DEFAULT_SKILLS_MANIFEST_URL}"
   local temp_manifest
   local subscription_json
 
@@ -932,20 +1173,20 @@ bootstrap() {
   write_wsl_home_profile
   install_node_codex
   write_codex_wrapper
+  write_apply_patch_wrapper
   ensure_default_model
   subscription_json="$(check_subscription_json)"
   print_subscription_summary "$subscription_json"
 
   temp_manifest="$(mktemp)"
-  if curl -fsSL "$manifest_url" -o "$temp_manifest"; then
+  if curl -fsSL "$DEFAULT_SKILLS_MANIFEST_URL" -o "$temp_manifest"; then
     if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
-      persist_manifest "$temp_manifest"
-      install_skills
+      install_skills_from_manifest "$temp_manifest"
     else
-      log_warn "下载到的 skills manifest 无效：$manifest_url，跳过 skills 安装。"
+      log_warn "下载到的 skills manifest 无效：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 安装。"
     fi
   else
-    log_warn "未能下载 skills manifest：$manifest_url，跳过 skills 安装。"
+    log_warn "未能下载 skills manifest：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 安装。"
   fi
   rm -f "$temp_manifest"
 
@@ -971,6 +1212,7 @@ main() {
       ;;
     install-wrapper)
       write_codex_wrapper
+      write_apply_patch_wrapper
       ;;
     ensure-default-model)
       ensure_default_model
@@ -978,14 +1220,11 @@ main() {
     check-subscription-json)
       check_subscription_json
       ;;
-    persist-manifest)
-      persist_manifest "${2:?missing manifest path}"
-      ;;
     install-skills)
-      install_skills
+      install_skills_from_manifest "${2:?missing manifest path}"
       ;;
     bootstrap)
-      bootstrap "${2:-0}" "${3:-$DEFAULT_SKILLS_MANIFEST_URL}"
+      bootstrap "${2:-0}"
       ;;
     "")
       printf 'missing command\n' >&2
