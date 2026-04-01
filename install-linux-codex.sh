@@ -20,22 +20,91 @@ ensure_root_home() {
 
 DEFAULT_SKILLS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
 
-sanitize_path() {
-  local path_value="$1"
-  local result=""
-  local segment
-  local IFS=:
-  for segment in $path_value; do
-    if [[ "$segment" == /mnt/c/Users/*/AppData/Roaming/npm ]]; then
+write_codex_path_file() {
+  ensure_root_home
+
+  mkdir -p "$HOME/.codex"
+  cat > "$HOME/.codex/path.sh" <<'EOF_PATH'
+#!/usr/bin/env sh
+
+codex_local_bin="$HOME/.local/bin"
+codex_npm_bin="$HOME/.codex/npm-global/bin"
+path_entries=""
+
+append_path() {
+  case ":$path_entries:" in
+    *":$1:"*)
+      return 0
+      ;;
+  esac
+
+  if [ -z "$path_entries" ]; then
+    path_entries="$1"
+  else
+    path_entries="$path_entries:$1"
+  fi
+}
+
+append_path "$codex_local_bin"
+append_path "$codex_npm_bin"
+
+IFS=:
+for segment in $PATH; do
+  [ -n "$segment" ] || continue
+  case "$segment" in
+    "$codex_local_bin"|"$codex_npm_bin"|/mnt/c/Users/*/AppData/Roaming/npm)
       continue
-    fi
-    if [ -z "$result" ]; then
-      result="$segment"
-    else
-      result="$result:$segment"
-    fi
-  done
-  printf '%s' "$result"
+      ;;
+  esac
+  append_path "$segment"
+done
+unset IFS
+
+PATH="$path_entries"
+export PATH
+EOF_PATH
+  chmod 0644 "$HOME/.codex/path.sh"
+}
+
+ensure_codex_shell_hook() {
+  local shell_file="$1"
+  local shell_dir
+  shell_dir="$(dirname "$shell_file")"
+  mkdir -p "$shell_dir"
+  touch "$shell_file"
+
+  python3 - "$shell_file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+block = '''### codex-wsl-bootstrap ###
+if [ -f "$HOME/.codex/path.sh" ]; then
+  . "$HOME/.codex/path.sh"
+fi
+### /codex-wsl-bootstrap ###'''
+text = path.read_text()
+start = text.find('### codex-wsl-bootstrap ###')
+end = text.find('### /codex-wsl-bootstrap ###')
+if start != -1 and end != -1:
+    end += len('### /codex-wsl-bootstrap ###')
+    prefix = text[:start].rstrip('\n')
+    suffix = text[end:].lstrip('\n')
+    parts = []
+    if prefix:
+        parts.append(prefix)
+    parts.append(block)
+    if suffix:
+        parts.append(suffix)
+    text = '\n\n'.join(parts) + '\n'
+else:
+    if text and not text.endswith('\n'):
+        text += '\n'
+    if text and not text.endswith('\n\n'):
+        text += '\n'
+    text += block + '\n'
+path.write_text(text)
+PY
 }
 
 install_base_packages() {
@@ -85,6 +154,14 @@ install_node_codex() {
   local codex_prefix="$HOME/.codex/npm-global"
   mkdir -p "$HOME/.local/bin" "$HOME/code" "$codex_prefix"
 
+  write_codex_path_file
+  ensure_codex_shell_hook "$HOME/.bashrc"
+  ensure_codex_shell_hook "$HOME/.profile"
+  ensure_codex_shell_hook "$HOME/.bash_profile"
+  ensure_codex_shell_hook "$HOME/.zshrc"
+  ensure_codex_shell_hook "$HOME/.zprofile"
+  . "$HOME/.codex/path.sh"
+
   set +u
   if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
     curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
@@ -92,23 +169,6 @@ install_node_codex() {
 
   export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-  export PATH="$codex_prefix/bin:$HOME/.local/bin:$PATH"
-
-  if ! grep -q '### codex-wsl-bootstrap ###' "$HOME/.bashrc" 2>/dev/null; then
-    cat >> "$HOME/.bashrc" <<'EOF_BASHRC'
-
-### codex-wsl-bootstrap ###
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-PATH="$HOME/.local/bin:$HOME/.codex/npm-global/bin:$PATH"
-PATH="$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: '!seen[$0]++' | sed 's/:$//')"
-export PATH
-### /codex-wsl-bootstrap ###
-EOF_BASHRC
-  fi
-
-  PATH="$(sanitize_path "$PATH")"
-  export PATH
 
   nvm install --lts
   nvm alias default 'lts/*'
