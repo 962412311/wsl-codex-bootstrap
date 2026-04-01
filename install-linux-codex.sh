@@ -16,7 +16,9 @@ log_warn() {
   printf '[WARN] %s\n' "$1"
 }
 
-log_info "install-linux-codex.sh version 1.0.0"
+print_script_version() {
+  printf "[INFO] install-linux-codex.sh version 1.0.0\n" >&2
+}
 
 ensure_root_home() {
   local target_user target_home
@@ -953,6 +955,9 @@ bootstrap() {
 
 main() {
   local command="${1:-}"
+  if [ "$command" != 'check-subscription-json' ]; then
+    print_script_version
+  fi
   case "$command" in
     install-base-packages)
       install_base_packages "${2:-0}"
