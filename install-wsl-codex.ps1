@@ -9,9 +9,9 @@
     [string]$BootstrapRef
 )
 
-# Version: 1.0.0
+# Version: 1.0.1
 # Update this version every time this script changes.
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
