@@ -78,7 +78,17 @@ from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
-block = '''### codex-wsl-bootstrap ###
+if path.name == '.bash_profile':
+    block = '''### codex-wsl-bootstrap ###
+if [ -f "$HOME/.profile" ]; then
+  . "$HOME/.profile"
+fi
+if [ -f "$HOME/.codex/path.sh" ]; then
+  . "$HOME/.codex/path.sh"
+fi
+### /codex-wsl-bootstrap ###'''
+else:
+    block = '''### codex-wsl-bootstrap ###
 if [ -f "$HOME/.codex/path.sh" ]; then
   . "$HOME/.codex/path.sh"
 fi
