@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Version: 1.0.3
+# Version: 1.0.4
 # Update this version every time this script changes.
 
 log_info() { printf '[INFO] %s\n' "$1"; }
 log_ok() { printf '[OK] %s\n' "$1"; }
 log_warn() { printf '[WARN] %s\n' "$1"; }
 
-log_info "install-mac-codex.sh version 1.0.3"
+log_info "install-mac-codex.sh version 1.0.4"
 
 source_linux_bootstrap() {
   local script_dir script_source linux_script tmp cleanup
@@ -154,6 +154,111 @@ install_base_packages() {
   done
 
   brew cleanup >/dev/null 2>&1 || true
+}
+
+install_node_codex() {
+  ensure_root_home
+
+  local codex_prefix="$HOME/.codex/npm-global"
+  mkdir -p "$HOME/.local/bin" "$HOME/code" "$codex_prefix"
+
+  write_codex_path_file
+  . "$HOME/.codex/path.sh"
+
+  set +u
+  if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
+  fi
+
+  export NVM_DIR="$HOME/.nvm"
+  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+  nvm install --lts
+  nvm alias default 'lts/*'
+  nvm use --lts
+  set -u
+
+  npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit
+  local codex_bin="$codex_prefix/bin/codex"
+
+  printf 'Node version: %s\n' "$(node -v)"
+  printf 'npm version : %s\n' "$(npm -v)"
+  printf 'codex version: %s\n' "$($codex_bin --version)"
+}
+
+bootstrap() {
+  local skip_upgrade="${1:-0}"
+  local temp_manifest
+  local subscription_json
+
+  install_base_packages "$skip_upgrade"
+  write_codex_path_file
+  install_node_codex
+  ensure_default_model
+  subscription_json="$(check_subscription_json)"
+  print_subscription_summary "$subscription_json"
+
+  temp_manifest="$(mktemp)"
+  if curl -fsSL "$DEFAULT_SKILLS_MANIFEST_URL" -o "$temp_manifest"; then
+    if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
+      install_skills_from_manifest "$temp_manifest"
+    else
+      log_warn "下载到的 skills manifest 无效：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 安装。"
+    fi
+  else
+    log_warn "未能下载 skills manifest：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 安装。"
+  fi
+  rm -f "$temp_manifest"
+
+  temp_manifest="$(mktemp)"
+  if curl -fsSL "$DEFAULT_PLUGINS_MANIFEST_URL" -o "$temp_manifest"; then
+    if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
+      install_claude_plugins_from_manifest "$temp_manifest" "$HOME/.claude"
+    else
+      log_warn "下载到的 plugins manifest 无效：$DEFAULT_PLUGINS_MANIFEST_URL，跳过插件恢复。"
+    fi
+  else
+    log_warn "未能下载 plugins manifest：$DEFAULT_PLUGINS_MANIFEST_URL，跳过插件恢复。"
+  fi
+  rm -f "$temp_manifest"
+
+  log_ok 'macOS 侧 Codex 已完成安装。'
+  log_info '进入 macOS 后运行：codex'
+}
+
+main() {
+  local command="${1:-}"
+  case "$command" in
+    install-base-packages)
+      install_base_packages "${2:-0}"
+      ;;
+    install-node-codex)
+      install_node_codex
+      ;;
+    ensure-default-model)
+      ensure_default_model
+      ;;
+    check-subscription-json)
+      check_subscription_json
+      ;;
+    install-skills)
+      install_skills_from_manifest "${2:?missing manifest path}"
+      ;;
+    install-claude-plugins)
+      install_claude_plugins_from_manifest "${2:?missing manifest path}" "${3:?missing claude root path}"
+      ;;
+    bootstrap)
+      bootstrap "${2:-0}"
+      ;;
+    "")
+      printf 'missing command\n' >&2
+      return 1
+      ;;
+    *)
+      printf 'unknown command: %s\n' "$command" >&2
+      return 1
+      ;;
+  esac
 }
 
 if [ -z "${CODEX_BOOTSTRAP_LIB:-}" ]; then
