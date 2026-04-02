@@ -29,6 +29,7 @@ source_linux_bootstrap() {
 }
 
 source_linux_bootstrap
+unset CODEX_BOOTSTRAP_LIB
 
 write_codex_path_file() {
   ensure_root_home
