@@ -8,6 +8,9 @@ log_info() { printf '[INFO] %s\n' "$1"; }
 log_ok() { printf '[OK] %s\n' "$1"; }
 log_warn() { printf '[WARN] %s\n' "$1"; }
 
+DEFAULT_SKILLS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
+DEFAULT_PLUGINS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/plugins.manifest.json'
+
 source_linux_bootstrap() {
   local script_dir script_source linux_script tmp cleanup had_bootstrap_lib previous_bootstrap_lib
   script_source="${BASH_SOURCE[0]:-$0}"
@@ -286,8 +289,12 @@ def clone_repo(repo, dest, version=None, commit=None):
     if commit_text and is_hex_version(commit_text):
         try:
             run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
-        except subprocess.CalledProcessError as exc:
-            warn(f'检出指定提交失败：{dest} @ {commit_text}（{exc}）')
+        except subprocess.CalledProcessError:
+            try:
+                run(['git', '-C', str(dest), 'fetch', '--depth', '1', 'origin', commit_text])
+                run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
+            except subprocess.CalledProcessError as exc:
+                warn(f'检出指定提交失败：{dest} @ {commit_text}（{exc}）')
     return True
 
 def home_path(relative_path):
@@ -642,15 +649,17 @@ update_stamp="$HOME/.codex/.codex-update-check.date"
 plugins_repo="$HOME/.codex/.tmp/plugins"
 skills_dir="$HOME/.codex/skills"
 skills_sync_root="$HOME/.codex/.tmp/skill-sync"
+DEFAULT_SKILLS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
+DEFAULT_PLUGINS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/plugins.manifest.json'
 
 update_plugins() {
-  if [ -d "$plugins_repo/.git" ]; then
+  if [ -d "${plugins_repo:-}/.git" ]; then
     echo "[INFO] 正在检查插件镜像更新。"
-    before="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
-    if git -C "$plugins_repo" pull --ff-only --quiet >/dev/null 2>&1; then
-      after="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
+    before="$(git -C "${plugins_repo:-}" rev-parse --short HEAD 2>/dev/null || true)"
+    if git -C "${plugins_repo:-}" pull --ff-only --quiet >/dev/null 2>&1; then
+      after="$(git -C "${plugins_repo:-}" rev-parse --short HEAD 2>/dev/null || true)"
       if [ -n "$before" ] && [ "$before" = "$after" ]; then
-        echo "[INFO] 插件镜像已是最新版本：$after。"
+        echo "[INFO] 插件镜像已是最新版本：${after:-unknown}。"
       else
         echo "[OK] 插件镜像已更新：${before:-unknown} -> ${after:-unknown}。"
       fi
@@ -660,8 +669,138 @@ update_plugins() {
     return 0
   fi
 
-  echo "[WARN] 未找到插件镜像仓库：$plugins_repo，跳过插件更新。"
+  echo "[WARN] 未找到插件镜像仓库：${plugins_repo:-}，跳过插件更新。"
   return 0
+}
+
+install_skills_from_manifest() {
+  local manifest_path="$1"
+  local skills_root="$skills_dir"
+  local skills_sync_root_local="$skills_sync_root"
+
+  mkdir -p "$skills_root" "$skills_sync_root_local"
+  python3 - "$manifest_path" "$skills_root" "$skills_sync_root_local" <<'PY'
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+skills_dir = Path(sys.argv[2])
+sync_root = Path(sys.argv[3])
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+if not manifest_path.exists():
+    print('skills manifest 不存在，跳过技能安装。')
+    sys.exit(0)
+
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('skills manifest 为空，跳过技能安装。')
+    sys.exit(0)
+
+try:
+    manifest = json.loads(manifest_text)
+except Exception as exc:
+    print(f'无法读取 skills manifest：{exc}')
+    sys.exit(0)
+
+skills = [
+    skill for skill in manifest.get('skills', [])
+    if skill is not None and (skill.get('enabled') is None or bool(skill.get('enabled')))
+]
+if not skills:
+    raise SystemExit('技能清单为空，跳过技能安装。')
+
+sources = {}
+resolved_skills = []
+for skill in skills:
+    name = skill.get('name')
+    source_id = skill.get('sourceId')
+    source_path = skill.get('sourcePath')
+    if not name or not source_id or not source_path:
+        warn('忽略一个缺少 name、sourceId 或 sourcePath 的 skill 条目。')
+        continue
+    if source_id not in sources:
+        source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
+        if not source or not source.get('repo'):
+            warn(f"跳过 skill {name}：source '{source_id}' 缺少 repo URL。")
+            continue
+        sources[source_id] = source
+    resolved_skills.append(skill)
+
+skills = resolved_skills
+if not skills:
+    warn('没有可安装的有效 skills，跳过 skills 安装。')
+    sys.exit(0)
+
+info(f'准备安装 {len(skills)} 个 skills，来自 {len(sources)} 个源。')
+installed_count = 0
+for source_id, source in sorted(sources.items()):
+    info(f'正在同步 skills 源：{source_id}（{source["repo"]}）。')
+    checkout_dir = sync_root / source_id
+    if checkout_dir.exists():
+        shutil.rmtree(checkout_dir)
+    cmd = ['git', 'clone', '--depth', '1']
+    ref = source.get('ref')
+    if ref:
+        cmd.extend(['--branch', str(ref)])
+    cmd.extend([source['repo'], str(checkout_dir)])
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as exc:
+        warn(f'同步 skills 源失败，已跳过：{source_id}（{exc}）。')
+        continue
+    if not checkout_dir.exists():
+        warn(f'同步 skills 源后目录不存在，已跳过：{source_id}。')
+        continue
+    ok(f'已同步 skills 源：{source_id}。')
+
+info('正在安装 skills 内容。')
+for skill in skills:
+    name = skill['name']
+    info(f'正在安装 skill：{name}。')
+    checkout_dir = sync_root / skill['sourceId']
+    source_path = skill['sourcePath']
+    dest_dir = skills_dir / name
+    source_dir = checkout_dir / source_path
+
+    if not source_dir.exists():
+        warn(f'跳过 skill {name}：缺少源文件 {skill["sourceId"]}/{source_path}。')
+        continue
+
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if source_path == '.':
+            subprocess.run(
+                ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
+                check=True,
+            )
+    except subprocess.CalledProcessError as exc:
+        warn(f'安装 skill 失败，已跳过：{name}（{exc}）。')
+        continue
+    installed_count += 1
+    ok(f'已安装 skill：{name}。')
+
+ok(f'已刷新 {installed_count} 个 skills。')
+PY
 }
 
 update_skills() {
@@ -811,25 +950,27 @@ update_codex() {
     return 0
   fi
 
-  current_version="$($real_codex --version 2>/dev/null | awk '{print $NF}')"
+  current_version="$($real_codex --version 2>/dev/null | awk '{print $NF}' || true)"
+  current_version="${current_version:-}"
   latest_version="$(npm view @openai/codex version --silent 2>/dev/null || true)"
+  latest_version="${latest_version:-}"
 
-  if [ -z "$latest_version" ]; then
+  if [ -z "${latest_version:-}" ]; then
     echo '[WARN] 无法获取 Codex 最新版本，跳过自动更新。'
     touch_update_stamp
     return 0
   fi
 
-  if [ "$current_version" = "$latest_version" ]; then
-    echo "[INFO] Codex 已是最新版本：$current_version。"
+  if [ "${current_version:-}" = "${latest_version:-}" ]; then
+    echo "[INFO] Codex 已是最新版本：${current_version:-}。"
     touch_update_stamp
     return 0
   fi
 
-  echo "[INFO] 检测到 Codex 新版本：$current_version -> $latest_version，开始更新。"
+  echo "[INFO] 检测到 Codex 新版本：${current_version:-} -> ${latest_version:-}，开始更新。"
   mkdir -p "$codex_prefix"
   if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
-    echo "[OK] Codex 已更新到最新版本：$latest_version。"
+    echo "[OK] Codex 已更新到最新版本：${latest_version:-}。"
   else
     echo '[WARN] Codex 更新失败，将继续使用当前版本。'
   fi

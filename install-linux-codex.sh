@@ -452,15 +452,17 @@ update_stamp="$HOME/.codex/.codex-update-check.date"
 plugins_repo="$HOME/.codex/.tmp/plugins"
 skills_dir="$HOME/.codex/skills"
 skills_sync_root="$HOME/.codex/.tmp/skill-sync"
+DEFAULT_SKILLS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
+DEFAULT_PLUGINS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/plugins.manifest.json'
 
 update_plugins() {
-  if [ -d "$plugins_repo/.git" ]; then
+  if [ -d "${plugins_repo:-}/.git" ]; then
     echo "[INFO] 正在检查插件镜像更新。"
-    before="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
-    if git -C "$plugins_repo" pull --ff-only --quiet >/dev/null 2>&1; then
-      after="$(git -C "$plugins_repo" rev-parse --short HEAD 2>/dev/null || true)"
+    before="$(git -C "${plugins_repo:-}" rev-parse --short HEAD 2>/dev/null || true)"
+    if git -C "${plugins_repo:-}" pull --ff-only --quiet >/dev/null 2>&1; then
+      after="$(git -C "${plugins_repo:-}" rev-parse --short HEAD 2>/dev/null || true)"
       if [ -n "$before" ] && [ "$before" = "$after" ]; then
-        echo "[INFO] 插件镜像已是最新版本：$after。"
+        echo "[INFO] 插件镜像已是最新版本：${after:-unknown}。"
       else
         echo "[OK] 插件镜像已更新：${before:-unknown} -> ${after:-unknown}。"
       fi
@@ -470,7 +472,7 @@ update_plugins() {
     return 0
   fi
 
-  echo "[WARN] 未找到插件镜像仓库：$plugins_repo，跳过插件更新。"
+  echo "[WARN] 未找到插件镜像仓库：${plugins_repo:-}，跳过插件更新。"
   return 0
 }
 
@@ -621,25 +623,27 @@ update_codex() {
     return 0
   fi
 
-  current_version="$($real_codex --version 2>/dev/null | awk '{print $NF}')"
+  current_version="$($real_codex --version 2>/dev/null | awk '{print $NF}' || true)"
+  current_version="${current_version:-}"
   latest_version="$(npm view @openai/codex version --silent 2>/dev/null || true)"
+  latest_version="${latest_version:-}"
 
-  if [ -z "$latest_version" ]; then
+  if [ -z "${latest_version:-}" ]; then
     echo '[WARN] 无法获取 Codex 最新版本，跳过自动更新。'
     touch_update_stamp
     return 0
   fi
 
-  if [ "$current_version" = "$latest_version" ]; then
-    echo "[INFO] Codex 已是最新版本：$current_version。"
+  if [ "${current_version:-}" = "${latest_version:-}" ]; then
+    echo "[INFO] Codex 已是最新版本：${current_version:-}。"
     touch_update_stamp
     return 0
   fi
 
-  echo "[INFO] 检测到 Codex 新版本：$current_version -> $latest_version，开始更新。"
+  echo "[INFO] 检测到 Codex 新版本：${current_version:-} -> ${latest_version:-}，开始更新。"
   mkdir -p "$codex_prefix"
   if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
-    echo "[OK] Codex 已更新到最新版本：$latest_version。"
+    echo "[OK] Codex 已更新到最新版本：${latest_version:-}。"
   else
     echo '[WARN] Codex 更新失败，将继续使用当前版本。'
   fi
@@ -1480,25 +1484,27 @@ update_codex() {
     return 0
   fi
 
-  current_version="$($real_codex --version 2>/dev/null | awk '{print $NF}')"
+  current_version="$($real_codex --version 2>/dev/null | awk '{print $NF}' || true)"
+  current_version="${current_version:-}"
   latest_version="$(npm view @openai/codex version --silent 2>/dev/null || true)"
+  latest_version="${latest_version:-}"
 
-  if [ -z "$latest_version" ]; then
+  if [ -z "${latest_version:-}" ]; then
     echo '[WARN] 无法获取 Codex 最新版本，跳过自动更新。'
     touch_update_stamp
     return 0
   fi
 
-  if [ "$current_version" = "$latest_version" ]; then
-    echo "[INFO] Codex 已是最新版本：$current_version。"
+  if [ "${current_version:-}" = "${latest_version:-}" ]; then
+    echo "[INFO] Codex 已是最新版本：${current_version:-}。"
     touch_update_stamp
     return 0
   fi
 
-  echo "[INFO] 检测到 Codex 新版本：$current_version -> $latest_version，开始更新。"
+  echo "[INFO] 检测到 Codex 新版本：${current_version:-} -> ${latest_version:-}，开始更新。"
   mkdir -p "$codex_prefix"
   if npm i -g --prefix "$codex_prefix" @openai/codex@latest --silent --no-fund --no-audit >/dev/null 2>&1; then
-    echo "[OK] Codex 已更新到最新版本：$latest_version。"
+    echo "[OK] Codex 已更新到最新版本：${latest_version:-}。"
   else
     echo '[WARN] Codex 更新失败，将继续使用当前版本。'
   fi
@@ -1809,8 +1815,12 @@ def clone_repo(repo, dest, version=None, commit=None):
     if commit_text and is_hex_version(commit_text):
         try:
             run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
-        except subprocess.CalledProcessError as exc:
-            warn(f'检出指定提交失败：{dest} @ {commit_text}（{exc}）')
+        except subprocess.CalledProcessError:
+            try:
+                run(['git', '-C', str(dest), 'fetch', '--depth', '1', 'origin', commit_text])
+                run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
+            except subprocess.CalledProcessError as exc:
+                warn(f'检出指定提交失败：{dest} @ {commit_text}（{exc}）')
     return True
 
 def home_path(relative_path):

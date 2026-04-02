@@ -43,16 +43,21 @@ run_case() {
   init_git_repo "$pua_repo"
   (
     cd "$pua_repo"
+    printf "pua repo\n" > README.md
+    git add README.md
+    git commit -q -m "initial"
+    git checkout -q -b release
     mkdir -p codex/pua commands
     printf "pua skill\n" > codex/pua/skill.txt
     printf "# pua\n" > commands/pua.md
     git add codex/pua/skill.txt commands/pua.md
-    git commit -q -m "initial"
+    git commit -q -m "release"
+    git checkout -q main
   )
 
   local super_commit pua_commit
   super_commit="$(git -C "$super_repo" rev-parse HEAD)"
-  pua_commit="$(git -C "$pua_repo" rev-parse HEAD)"
+  pua_commit="$(git -C "$pua_repo" rev-parse release)"
 
   cat > "$manifest_path" <<JSON
 {
@@ -122,6 +127,8 @@ JSON
     source "$script_path"
     ensure_root_home() { :; }
     install_claude_plugins_from_manifest "$manifest_path" "$HOME/.claude"
+    test "$(git -C "$HOME/.codex/superpowers" rev-parse HEAD)" = "$super_commit"
+    test "$(git -C "$HOME/.codex/pua" rev-parse HEAD)" = "$pua_commit"
     test -e "$HOME/.agents/skills/superpowers"
     test -e "$HOME/.codex/skills/pua"
     test -e "$HOME/.codex/prompts/pua.md"
