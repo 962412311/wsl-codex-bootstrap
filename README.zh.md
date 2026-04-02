@@ -48,7 +48,7 @@ curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/
 curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-mac-codex.sh | bash -s -- bootstrap
 ```
 
-首次运行会自动安装或复用 Homebrew，并配置 `~/.local/bin/codex`、默认模型、订阅检查和 skills 同步。
+首次运行会自动安装或复用 Homebrew，并配置 `~/.local/bin/codex`、`~/.local/bin/apply_patch`、shell 启动挂钩、默认模型、订阅检查、skills 同步和 plugins 状态恢复。
 
 首次运行安装基础包时可能会提示输入 `sudo` 密码。
 

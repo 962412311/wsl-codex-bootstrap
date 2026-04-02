@@ -48,7 +48,7 @@ Run this on macOS to install Codex into the current macOS user account:
 curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-mac-codex.sh | bash -s -- bootstrap
 ```
 
-The first run will install or reuse Homebrew, then configure `~/.local/bin/codex`, the default model, subscription checks, and skills syncing.
+The first run will install or reuse Homebrew, then configure `~/.local/bin/codex`, `~/.local/bin/apply_patch`, shell startup hooks, the default model, subscription checks, skills syncing, and plugin state restoration.
 
 The first run may prompt for `sudo` when it installs base packages.
 
