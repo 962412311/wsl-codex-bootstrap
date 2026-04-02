@@ -1,35 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Version: 1.0.5
+# Version: 1.0.7
 # Update this version every time this script changes.
 
 log_info() { printf '[INFO] %s\n' "$1"; }
 log_ok() { printf '[OK] %s\n' "$1"; }
 log_warn() { printf '[WARN] %s\n' "$1"; }
 
-log_info "install-mac-codex.sh version 1.0.5"
+log_info "install-mac-codex.sh version 1.0.7"
 
 source_linux_bootstrap() {
-  local script_dir script_source linux_script tmp cleanup
+  local script_dir script_source linux_script tmp cleanup had_bootstrap_lib previous_bootstrap_lib
   script_source="${BASH_SOURCE[0]:-$0}"
   script_dir="$(cd "$(dirname "$script_source")" && pwd)"
   linux_script="$script_dir/install-linux-codex.sh"
+  had_bootstrap_lib=0
+  previous_bootstrap_lib="${CODEX_BOOTSTRAP_LIB:-}"
+  if [ "${CODEX_BOOTSTRAP_LIB+x}" = x ]; then
+    had_bootstrap_lib=1
+  fi
 
   if [ -f "$linux_script" ]; then
     CODEX_BOOTSTRAP_LIB=1 . "$linux_script"
-    return 0
+  else
+    tmp="$(mktemp)"
+    cleanup="rm -f '$tmp'"
+    trap "$cleanup" EXIT
+    /usr/bin/curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-linux-codex.sh -o "$tmp"
+    CODEX_BOOTSTRAP_LIB=1 . "$tmp"
   fi
 
-  tmp="$(mktemp)"
-  cleanup="rm -f '$tmp'"
-  trap "$cleanup" EXIT
-  /usr/bin/curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-linux-codex.sh -o "$tmp"
-  CODEX_BOOTSTRAP_LIB=1 . "$tmp"
+  if [ "$had_bootstrap_lib" = '1' ]; then
+    CODEX_BOOTSTRAP_LIB="$previous_bootstrap_lib"
+  else
+    unset CODEX_BOOTSTRAP_LIB
+  fi
 }
 
 source_linux_bootstrap
-unset CODEX_BOOTSTRAP_LIB
 
 write_codex_path_file() {
   ensure_root_home
