@@ -446,6 +446,24 @@ resolve_codex_home() {
 
 resolve_codex_home
 
+ensure_root_home() {
+  local target_user target_home
+
+  target_user="${SUDO_USER:-$(id -un)}"
+  if [ -z "$target_user" ] || [ "$target_user" = 'root' ]; then
+    target_user="$(id -un)"
+  fi
+
+  target_home="$(getent passwd "$target_user" 2>/dev/null | awk -F: 'NR==1 { print $6 }')"
+  if [ -z "$target_home" ]; then
+    target_home="${HOME:-/root}"
+  fi
+
+  export USER="$target_user"
+  export LOGNAME="$target_user"
+  export HOME="$target_home"
+}
+
 codex_prefix="$HOME/.codex/npm-global"
 real_codex="$codex_prefix/bin/codex"
 update_stamp="$HOME/.codex/.codex-update-check.date"
@@ -474,6 +492,682 @@ update_plugins() {
 
   echo "[WARN] 未找到插件镜像仓库：${plugins_repo:-}，跳过插件更新。"
   return 0
+}
+
+install_skills_from_manifest() {
+  ensure_root_home
+
+  local manifest_path="$1"
+  local skills_dir="$HOME/.codex/skills"
+  local skills_sync_root="$HOME/.codex/.tmp/skill-sync"
+
+  mkdir -p "$skills_dir" "$skills_sync_root"
+  python3 - "$manifest_path" "$skills_dir" "$skills_sync_root" <<'PY'
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+skills_dir = Path(sys.argv[2])
+sync_root = Path(sys.argv[3])
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+if not manifest_path.exists():
+    print('skills manifest 不存在，跳过技能安装。')
+    sys.exit(0)
+
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('skills manifest 为空，跳过技能安装。')
+    sys.exit(0)
+
+try:
+    manifest = json.loads(manifest_text)
+except Exception as exc:
+    print(f'无法读取 skills manifest：{exc}')
+    sys.exit(0)
+
+skills = [
+    skill for skill in manifest.get('skills', [])
+    if skill is not None and (skill.get('enabled') is None or bool(skill.get('enabled')))
+]
+if not skills:
+    raise SystemExit('技能清单为空，跳过技能安装。')
+
+sources = {}
+resolved_skills = []
+for skill in skills:
+    name = skill.get('name')
+    source_id = skill.get('sourceId')
+    source_path = skill.get('sourcePath')
+    if not name or not source_id or not source_path:
+        warn('忽略一个缺少 name、sourceId 或 sourcePath 的 skill 条目。')
+        continue
+    if source_id not in sources:
+        source = next((item for item in manifest.get('sources', []) if item.get('id') == source_id), None)
+        if not source or not source.get('repo'):
+            warn(f"跳过 skill {name}：source '{source_id}' 缺少 repo URL。")
+            continue
+        sources[source_id] = source
+    resolved_skills.append(skill)
+
+skills = resolved_skills
+if not skills:
+    warn('没有可安装的有效 skills，跳过 skills 安装。')
+    sys.exit(0)
+
+info(f'准备安装 {len(skills)} 个 skills，来自 {len(sources)} 个源。')
+installed_count = 0
+for source_id, source in sorted(sources.items()):
+    info(f'正在同步 skills 源：{source_id}（{source["repo"]}）。')
+    checkout_dir = sync_root / source_id
+    if checkout_dir.exists():
+        shutil.rmtree(checkout_dir)
+    cmd = ['git', 'clone', '--depth', '1']
+    ref = source.get('ref')
+    if ref:
+        cmd.extend(['--branch', str(ref)])
+    cmd.extend([source['repo'], str(checkout_dir)])
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as exc:
+        warn(f'同步 skills 源失败，已跳过：{source_id}（{exc}）。')
+        continue
+    if not checkout_dir.exists():
+        warn(f'同步 skills 源后目录不存在，已跳过：{source_id}。')
+        continue
+    ok(f'已同步 skills 源：{source_id}。')
+
+info('正在安装 skills 内容。')
+for skill in skills:
+    name = skill['name']
+    info(f'正在安装 skill：{name}。')
+    checkout_dir = sync_root / skill['sourceId']
+    source_path = skill['sourcePath']
+    dest_dir = skills_dir / name
+    source_dir = checkout_dir / source_path
+
+    if not source_dir.exists():
+        warn(f'跳过 skill {name}：缺少源文件 {skill["sourceId"]}/{source_path}。')
+        continue
+
+    if dest_dir.exists():
+        shutil.rmtree(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if source_path == '.':
+            subprocess.run(
+                ['rsync', '-a', '--delete', '--exclude=.git', f'{checkout_dir}/', f'{dest_dir}/'],
+                check=True,
+            )
+        else:
+            subprocess.run(
+                ['rsync', '-a', '--delete', f'{source_dir}/', f'{dest_dir}/'],
+                check=True,
+            )
+    except subprocess.CalledProcessError as exc:
+        warn(f'安装 skill 失败，已跳过：{name}（{exc}）。')
+        continue
+    installed_count += 1
+    ok(f'已安装 skill：{name}。')
+
+ok(f'已刷新 {installed_count} 个 skills。')
+PY
+}
+
+install_claude_plugins_from_manifest() {
+  ensure_root_home
+
+  local manifest_path="$1"
+  local claude_root="$2"
+  local plugins_sync_root="$HOME/.codex/.tmp/plugin-sync"
+
+  mkdir -p "$plugins_sync_root" "$claude_root/plugins"
+  python3 - "$manifest_path" "$claude_root" "$plugins_sync_root" <<'PY'
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+claude_root = Path(sys.argv[2])
+sync_root = Path(sys.argv[3])
+plugins_root = claude_root / 'plugins'
+marketplaces_root = plugins_root / 'marketplaces'
+cache_root = plugins_root / 'cache'
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+def wsl_to_windows_path(path: Path) -> str:
+    text = str(path)
+    match = re.match(r'^/mnt/([a-zA-Z])/(.*)$', text)
+    if match:
+      drive = match.group(1).upper()
+      tail = match.group(2).replace('/', '\\')
+      return f'{drive}:\\{tail}'
+    return text
+
+def run(cmd, cwd=None):
+    subprocess.run(cmd, check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def run_with_retry(cmd, cwd=None, attempts=2):
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            run(cmd, cwd=cwd)
+            return
+        except subprocess.CalledProcessError as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                continue
+            raise last_exc
+
+def is_hex_version(version):
+    return bool(version) and re.fullmatch(r'[0-9a-fA-F]{7,40}', str(version)) is not None
+
+def clone_repo(repo, dest, version=None, commit=None):
+    if dest.exists() and (dest / '.git').exists():
+        try:
+            run(['git', '-C', str(dest), 'pull', '--ff-only', '--quiet'])
+            return
+        except subprocess.CalledProcessError as exc:
+            warn(f'更新现有仓库失败，准备重建：{dest}（{exc}）')
+            shutil.rmtree(dest)
+    elif dest.exists():
+        shutil.rmtree(dest)
+
+    version_text = str(version or '')
+    commit_text = str(commit or '')
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    cloned = False
+    ref_candidates = []
+    if version_text and version_text != 'unknown' and not is_hex_version(version_text):
+        ref_candidates.append(version_text)
+        if version_text.startswith('v'):
+            stripped_version = version_text[1:]
+            if stripped_version and stripped_version not in ref_candidates:
+                ref_candidates.append(stripped_version)
+        else:
+            prefixed_version = f'v{version_text}'
+            if prefixed_version not in ref_candidates:
+                ref_candidates.append(prefixed_version)
+
+    for ref in ref_candidates:
+        cmd = ['git', 'clone', '--depth', '1', '--branch', ref, '--single-branch', repo, str(dest)]
+        try:
+            run_with_retry(cmd)
+            cloned = True
+            break
+        except subprocess.CalledProcessError:
+            if dest.exists():
+                shutil.rmtree(dest)
+
+    if not cloned:
+        cmd = ['git', 'clone', '--depth', '1', repo, str(dest)]
+        try:
+            run_with_retry(cmd)
+            cloned = True
+        except subprocess.CalledProcessError as exc:
+            warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
+            return False
+
+    if commit_text and is_hex_version(commit_text):
+        try:
+            run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
+        except subprocess.CalledProcessError as exc:
+            warn(f'检出指定提交失败：{dest} @ {commit_text}（{exc}）')
+    return True
+
+def home_path(relative_path):
+    text = str(relative_path).strip()
+    if text.startswith('~'):
+        text = text[1:]
+    text = text.lstrip('/\\')
+    return Path.home() / text
+
+def remove_path(path):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    if path.exists():
+        shutil.rmtree(path)
+
+def ensure_symlink(source, target, is_dir=False):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() or target.is_symlink():
+        remove_path(target)
+    os.symlink(source, target, target_is_directory=is_dir)
+
+def copy_tree(source, destination):
+    if destination.exists():
+        remove_path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if source.is_dir():
+        shutil.copytree(source, destination, symlinks=True, ignore=shutil.ignore_patterns('.git'))
+    else:
+        shutil.copy2(source, destination)
+
+if not manifest_path.exists():
+    print('plugins manifest 不存在，跳过插件恢复。')
+    sys.exit(0)
+
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('plugins manifest 为空，跳过插件恢复。')
+    sys.exit(0)
+
+try:
+    manifest = json.loads(manifest_text)
+except Exception as exc:
+    print(f'无法读取 plugins manifest：{exc}')
+    sys.exit(0)
+
+marketplaces = manifest.get('marketplaces', [])
+plugins = manifest.get('plugins', [])
+if not marketplaces or not plugins:
+    warn('plugins manifest 中没有可恢复的 marketplace 或 plugin。')
+    sys.exit(0)
+
+now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+marketplace_state = {}
+for marketplace in marketplaces:
+    marketplace_id = marketplace.get('id')
+    repo = marketplace.get('repo')
+    if not marketplace_id or not repo:
+        warn('忽略一个缺少 id 或 repo 的 marketplace 条目。')
+        continue
+
+    dest_dir = marketplaces_root / marketplace_id
+    clone_repo(repo, dest_dir, marketplace.get('version'))
+    marketplace_state[marketplace_id] = {
+        'source': {
+            'source': marketplace.get('source', 'github'),
+            'repo': repo,
+        },
+        'installLocation': wsl_to_windows_path(dest_dir),
+        'lastUpdated': marketplace.get('lastUpdated', now_iso),
+    }
+    ok(f'已同步 marketplace：{marketplace_id}。')
+
+installed_plugins = {}
+for plugin in plugins:
+    plugin_id = plugin.get('pluginId')
+    marketplace_id = plugin.get('marketplaceId')
+    source_repo = plugin.get('sourceRepo')
+    install_path = plugin.get('installPath')
+    version = plugin.get('version')
+    restore = plugin.get('restore') or {}
+    restore_kind = restore.get('kind', 'marketplace-plugin')
+    if not plugin_id or not marketplace_id or not source_repo:
+        warn('忽略一个缺少 pluginId、marketplaceId 或 sourceRepo 的 plugin 条目。')
+        continue
+
+    plugin_name = plugin_id.split('@', 1)[0]
+    if restore_kind == 'codex-skill-package':
+        install_root = home_path(restore.get('installRoot') or f'.codex/{plugin_name}')
+        clone_repo(source_repo, install_root, version, plugin.get('gitCommitSha'))
+
+        for link in restore.get('links', []):
+            source_rel = link.get('source')
+            target_rel = link.get('target')
+            if not source_rel or not target_rel:
+                warn(f'忽略一个缺少 source 或 target 的链接：{plugin_id}。')
+                continue
+            source_path = install_root / source_rel
+            target_path = home_path(target_rel)
+            if not source_path.exists():
+                warn(f'跳过链接，源路径不存在：{source_path}。')
+                continue
+            ensure_symlink(source_path, target_path, link.get('type') == 'dir')
+
+        installed_plugins.setdefault(plugin_id, []).append({
+            'scope': 'user',
+            'installPath': str(install_root),
+            'version': version,
+            'installedAt': plugin.get('installedAt', now_iso),
+            'lastUpdated': plugin.get('lastUpdated', now_iso),
+            **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+        })
+        ok(f'已恢复本地 plugin 包：{plugin_name}。')
+        continue
+
+    source_path = restore.get('sourcePath', '.')
+    if not install_path:
+        warn(f'忽略一个缺少 installPath 的 marketplace plugin 条目：{plugin_id}。')
+        continue
+
+    checkout_dir = sync_root / marketplace_id / plugin_name
+    if checkout_dir.exists():
+        shutil.rmtree(checkout_dir)
+    clone_repo(source_repo, checkout_dir, version, plugin.get('gitCommitSha'))
+
+    cache_dir = claude_root / install_path
+    source_dir = checkout_dir / source_path
+    if not source_dir.exists():
+        warn(f'跳过 plugin {plugin_name}：缺少源文件 {source_path}。')
+        continue
+
+    if source_dir.resolve() == checkout_dir.resolve():
+        copy_tree(checkout_dir, cache_dir)
+    else:
+        copy_tree(source_dir, cache_dir)
+
+    installed_plugins.setdefault(plugin_id, []).append({
+        'scope': 'user',
+        'installPath': wsl_to_windows_path(cache_dir),
+        'version': version,
+        'installedAt': plugin.get('installedAt', now_iso),
+        'lastUpdated': plugin.get('lastUpdated', now_iso),
+        **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+    })
+    ok(f'已同步 plugin：{plugin_name}。')
+
+installed_plugins_path = plugins_root / 'installed_plugins.json'
+known_marketplaces_path = plugins_root / 'known_marketplaces.json'
+
+installed_plugins_path.write_text(json.dumps({'version': 2, 'plugins': installed_plugins}, indent=2, ensure_ascii=False) + '\n')
+known_marketplaces_path.write_text(json.dumps(marketplace_state, indent=2, ensure_ascii=False) + '\n')
+
+ok(f'已重建 Claude 插件状态：{len(installed_plugins)} 个 plugins，{len(marketplace_state)} 个 marketplaces。')
+PY
+}
+
+install_claude_plugins_from_manifest() {
+  ensure_root_home
+
+  local manifest_path="$1"
+  local claude_root="$2"
+  local plugins_sync_root="$HOME/.codex/.tmp/plugin-sync"
+
+  mkdir -p "$plugins_sync_root" "$claude_root/plugins"
+  python3 - "$manifest_path" "$claude_root" "$plugins_sync_root" <<'PY'
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+claude_root = Path(sys.argv[2])
+sync_root = Path(sys.argv[3])
+plugins_root = claude_root / 'plugins'
+marketplaces_root = plugins_root / 'marketplaces'
+cache_root = plugins_root / 'cache'
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+def wsl_to_windows_path(path: Path) -> str:
+    text = str(path)
+    match = re.match(r'^/mnt/([a-zA-Z])/(.*)$', text)
+    if match:
+      drive = match.group(1).upper()
+      tail = match.group(2).replace('/', '\\')
+      return f'{drive}:\\{tail}'
+    return text
+
+def run(cmd, cwd=None):
+    subprocess.run(cmd, check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def run_with_retry(cmd, cwd=None, attempts=2):
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            run(cmd, cwd=cwd)
+            return
+        except subprocess.CalledProcessError as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                continue
+            raise last_exc
+
+def is_hex_version(version):
+    return bool(version) and re.fullmatch(r'[0-9a-fA-F]{7,40}', str(version)) is not None
+
+def clone_repo(repo, dest, version=None, commit=None):
+    if dest.exists() and (dest / '.git').exists():
+        try:
+            run(['git', '-C', str(dest), 'pull', '--ff-only', '--quiet'])
+            return
+        except subprocess.CalledProcessError as exc:
+            warn(f'更新现有仓库失败，准备重建：{dest}（{exc}）')
+            shutil.rmtree(dest)
+    elif dest.exists():
+        shutil.rmtree(dest)
+
+    version_text = str(version or '')
+    commit_text = str(commit or '')
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    cloned = False
+    ref_candidates = []
+    if version_text and version_text != 'unknown' and not is_hex_version(version_text):
+        ref_candidates.append(version_text)
+        if version_text.startswith('v'):
+            stripped_version = version_text[1:]
+            if stripped_version and stripped_version not in ref_candidates:
+                ref_candidates.append(stripped_version)
+        else:
+            prefixed_version = f'v{version_text}'
+            if prefixed_version not in ref_candidates:
+                ref_candidates.append(prefixed_version)
+
+    for ref in ref_candidates:
+        cmd = ['git', 'clone', '--depth', '1', '--branch', ref, '--single-branch', repo, str(dest)]
+        try:
+            run_with_retry(cmd)
+            cloned = True
+            break
+        except subprocess.CalledProcessError:
+            if dest.exists():
+                shutil.rmtree(dest)
+
+    if not cloned:
+        cmd = ['git', 'clone', '--depth', '1', repo, str(dest)]
+        try:
+            run_with_retry(cmd)
+            cloned = True
+        except subprocess.CalledProcessError as exc:
+            warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
+            return False
+
+    if commit_text and is_hex_version(commit_text):
+        try:
+            run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
+        except subprocess.CalledProcessError as exc:
+            warn(f'检出指定提交失败：{dest} @ {commit_text}（{exc}）')
+    return True
+
+def home_path(relative_path):
+    text = str(relative_path).strip()
+    if text.startswith('~'):
+        text = text[1:]
+    text = text.lstrip('/\\')
+    return Path.home() / text
+
+def remove_path(path):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    if path.exists():
+        shutil.rmtree(path)
+
+def ensure_symlink(source, target, is_dir=False):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() or target.is_symlink():
+        remove_path(target)
+    os.symlink(source, target, target_is_directory=is_dir)
+
+def copy_tree(source, destination):
+    if destination.exists():
+        remove_path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if source.is_dir():
+        shutil.copytree(source, destination, symlinks=True, ignore=shutil.ignore_patterns('.git'))
+    else:
+        shutil.copy2(source, destination)
+
+if not manifest_path.exists():
+    print('plugins manifest 不存在，跳过插件恢复。')
+    sys.exit(0)
+
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('plugins manifest 为空，跳过插件恢复。')
+    sys.exit(0)
+
+try:
+    manifest = json.loads(manifest_text)
+except Exception as exc:
+    print(f'无法读取 plugins manifest：{exc}')
+    sys.exit(0)
+
+marketplaces = manifest.get('marketplaces', [])
+plugins = manifest.get('plugins', [])
+if not marketplaces or not plugins:
+    warn('plugins manifest 中没有可恢复的 marketplace 或 plugin。')
+    sys.exit(0)
+
+now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+marketplace_state = {}
+for marketplace in marketplaces:
+    marketplace_id = marketplace.get('id')
+    repo = marketplace.get('repo')
+    if not marketplace_id or not repo:
+        warn('忽略一个缺少 id 或 repo 的 marketplace 条目。')
+        continue
+
+    dest_dir = marketplaces_root / marketplace_id
+    clone_repo(repo, dest_dir, marketplace.get('version'))
+    marketplace_state[marketplace_id] = {
+        'source': {
+            'source': marketplace.get('source', 'github'),
+            'repo': repo,
+        },
+        'installLocation': wsl_to_windows_path(dest_dir),
+        'lastUpdated': marketplace.get('lastUpdated', now_iso),
+    }
+    ok(f'已同步 marketplace：{marketplace_id}。')
+
+installed_plugins = {}
+for plugin in plugins:
+    plugin_id = plugin.get('pluginId')
+    marketplace_id = plugin.get('marketplaceId')
+    source_repo = plugin.get('sourceRepo')
+    install_path = plugin.get('installPath')
+    version = plugin.get('version')
+    restore = plugin.get('restore') or {}
+    restore_kind = restore.get('kind', 'marketplace-plugin')
+    if not plugin_id or not marketplace_id or not source_repo:
+        warn('忽略一个缺少 pluginId、marketplaceId 或 sourceRepo 的 plugin 条目。')
+        continue
+
+    plugin_name = plugin_id.split('@', 1)[0]
+    if restore_kind == 'codex-skill-package':
+        install_root = home_path(restore.get('installRoot') or f'.codex/{plugin_name}')
+        clone_repo(source_repo, install_root, version, plugin.get('gitCommitSha'))
+
+        for link in restore.get('links', []):
+            source_rel = link.get('source')
+            target_rel = link.get('target')
+            if not source_rel or not target_rel:
+                warn(f'忽略一个缺少 source 或 target 的链接：{plugin_id}。')
+                continue
+            source_path = install_root / source_rel
+            target_path = home_path(target_rel)
+            if not source_path.exists():
+                warn(f'跳过链接，源路径不存在：{source_path}。')
+                continue
+            ensure_symlink(source_path, target_path, link.get('type') == 'dir')
+
+        installed_plugins.setdefault(plugin_id, []).append({
+            'scope': 'user',
+            'installPath': str(install_root),
+            'version': version,
+            'installedAt': plugin.get('installedAt', now_iso),
+            'lastUpdated': plugin.get('lastUpdated', now_iso),
+            **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+        })
+        ok(f'已恢复本地 plugin 包：{plugin_name}。')
+        continue
+
+    source_path = restore.get('sourcePath', '.')
+    if not install_path:
+        warn(f'忽略一个缺少 installPath 的 marketplace plugin 条目：{plugin_id}。')
+        continue
+
+    checkout_dir = sync_root / marketplace_id / plugin_name
+    if checkout_dir.exists():
+        shutil.rmtree(checkout_dir)
+    clone_repo(source_repo, checkout_dir, version, plugin.get('gitCommitSha'))
+
+    cache_dir = claude_root / install_path
+    source_dir = checkout_dir / source_path
+    if not source_dir.exists():
+        warn(f'跳过 plugin {plugin_name}：缺少源文件 {source_path}。')
+        continue
+
+    if source_dir.resolve() == checkout_dir.resolve():
+        copy_tree(checkout_dir, cache_dir)
+    else:
+        copy_tree(source_dir, cache_dir)
+
+    installed_plugins.setdefault(plugin_id, []).append({
+        'scope': 'user',
+        'installPath': wsl_to_windows_path(cache_dir),
+        'version': version,
+        'installedAt': plugin.get('installedAt', now_iso),
+        'lastUpdated': plugin.get('lastUpdated', now_iso),
+        **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+    })
+    ok(f'已同步 plugin：{plugin_name}。')
+
+installed_plugins_path = plugins_root / 'installed_plugins.json'
+known_marketplaces_path = plugins_root / 'known_marketplaces.json'
+
+installed_plugins_path.write_text(json.dumps({'version': 2, 'plugins': installed_plugins}, indent=2, ensure_ascii=False) + '\n')
+known_marketplaces_path.write_text(json.dumps(marketplace_state, indent=2, ensure_ascii=False) + '\n')
+
+ok(f'已重建 Claude 插件状态：{len(installed_plugins)} 个 plugins，{len(marketplace_state)} 个 marketplaces。')
+PY
 }
 
 update_skills() {
@@ -847,6 +1541,18 @@ def wsl_to_windows_path(path: Path) -> str:
 def run(cmd, cwd=None):
     subprocess.run(cmd, check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+def run_with_retry(cmd, cwd=None, attempts=2):
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            run(cmd, cwd=cwd)
+            return
+        except subprocess.CalledProcessError as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                continue
+            raise last_exc
+
 def is_hex_version(version):
     return bool(version) and re.fullmatch(r'[0-9a-fA-F]{7,40}', str(version)) is not None
 
@@ -882,7 +1588,7 @@ def clone_repo(repo, dest, version=None, commit=None):
     for ref in ref_candidates:
         cmd = ['git', 'clone', '--depth', '1', '--branch', ref, '--single-branch', repo, str(dest)]
         try:
-            run(cmd)
+            run_with_retry(cmd)
             cloned = True
             break
         except subprocess.CalledProcessError:
@@ -892,7 +1598,7 @@ def clone_repo(repo, dest, version=None, commit=None):
     if not cloned:
         cmd = ['git', 'clone', '--depth', '1', repo, str(dest)]
         try:
-            run(cmd)
+            run_with_retry(cmd)
             cloned = True
         except subprocess.CalledProcessError as exc:
             warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
@@ -1107,6 +1813,18 @@ def wsl_to_windows_path(path: Path) -> str:
 def run(cmd, cwd=None):
     subprocess.run(cmd, check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+def run_with_retry(cmd, cwd=None, attempts=2):
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            run(cmd, cwd=cwd)
+            return
+        except subprocess.CalledProcessError as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                continue
+            raise last_exc
+
 def is_hex_version(version):
     return bool(version) and re.fullmatch(r'[0-9a-fA-F]{7,40}', str(version)) is not None
 
@@ -1142,7 +1860,7 @@ def clone_repo(repo, dest, version=None, commit=None):
     for ref in ref_candidates:
         cmd = ['git', 'clone', '--depth', '1', '--branch', ref, '--single-branch', repo, str(dest)]
         try:
-            run(cmd)
+            run_with_retry(cmd)
             cloned = True
             break
         except subprocess.CalledProcessError:
@@ -1152,7 +1870,7 @@ def clone_repo(repo, dest, version=None, commit=None):
     if not cloned:
         cmd = ['git', 'clone', '--depth', '1', repo, str(dest)]
         try:
-            run(cmd)
+            run_with_retry(cmd)
             cloned = True
         except subprocess.CalledProcessError as exc:
             warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
@@ -1764,6 +2482,18 @@ def wsl_to_windows_path(path: Path) -> str:
 def run(cmd, cwd=None):
     subprocess.run(cmd, check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+def run_with_retry(cmd, cwd=None, attempts=2):
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            run(cmd, cwd=cwd)
+            return
+        except subprocess.CalledProcessError as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                continue
+            raise last_exc
+
 def is_hex_version(version):
     return bool(version) and re.fullmatch(r'[0-9a-fA-F]{7,40}', str(version)) is not None
 
@@ -1797,7 +2527,7 @@ def clone_repo(repo, dest, version=None, commit=None):
     for ref in ref_candidates:
         cmd = ['git', 'clone', '--depth', '1', '--branch', ref, '--single-branch', repo, str(dest)]
         try:
-            run(cmd)
+            run_with_retry(cmd)
             cloned = True
             break
         except subprocess.CalledProcessError:
@@ -1807,7 +2537,7 @@ def clone_repo(repo, dest, version=None, commit=None):
     if not cloned:
         cmd = ['git', 'clone', '--depth', '1', repo, str(dest)]
         try:
-            run(cmd)
+            run_with_retry(cmd)
             cloned = True
         except subprocess.CalledProcessError as exc:
             warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')

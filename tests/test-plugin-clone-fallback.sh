@@ -52,7 +52,7 @@ run_case() {
     printf "# pua\n" > commands/pua.md
     git add codex/pua/skill.txt commands/pua.md
     git commit -q -m "release"
-    git checkout -q main
+    git checkout -q -
   )
 
   local super_commit pua_commit

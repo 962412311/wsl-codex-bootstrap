@@ -235,6 +235,18 @@ def wsl_to_windows_path(path: Path) -> str:
 def run(cmd, cwd=None):
     subprocess.run(cmd, check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+def run_with_retry(cmd, cwd=None, attempts=2):
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            run(cmd, cwd=cwd)
+            return
+        except subprocess.CalledProcessError as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                continue
+            raise last_exc
+
 def is_hex_version(version):
     return bool(version) and re.fullmatch(r'[0-9a-fA-F]{7,40}', str(version)) is not None
 
@@ -270,7 +282,7 @@ def clone_repo(repo, dest, version=None, commit=None):
     for ref in ref_candidates:
         cmd = ['git', 'clone', '--depth', '1', '--branch', ref, '--single-branch', repo, str(dest)]
         try:
-            run(cmd)
+            run_with_retry(cmd)
             cloned = True
             break
         except subprocess.CalledProcessError:
@@ -280,7 +292,7 @@ def clone_repo(repo, dest, version=None, commit=None):
     if not cloned:
         cmd = ['git', 'clone', '--depth', '1', repo, str(dest)]
         try:
-            run(cmd)
+            run_with_retry(cmd)
             cloned = True
         except subprocess.CalledProcessError as exc:
             warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
@@ -642,6 +654,35 @@ PY
 }
 
 resolve_codex_home
+
+ensure_root_home() {
+  local target_user target_home
+
+  target_user="${SUDO_USER:-$(id -un)}"
+  if [ -z "$target_user" ] || [ "$target_user" = 'root' ]; then
+    target_user="$(id -un)"
+  fi
+
+  target_home="$(python3 - "$target_user" <<'PY_INNER'
+import os
+import pwd
+import sys
+
+user = sys.argv[1]
+try:
+    print(pwd.getpwnam(user).pw_dir)
+except Exception:
+    print(os.path.expanduser('~'))
+PY_INNER
+)"
+  if [ -z "$target_home" ]; then
+    target_home="${HOME:-/root}"
+  fi
+
+  export USER="$target_user"
+  export LOGNAME="$target_user"
+  export HOME="$target_home"
+}
 
 codex_prefix="$HOME/.codex/npm-global"
 real_codex="$codex_prefix/bin/codex"
