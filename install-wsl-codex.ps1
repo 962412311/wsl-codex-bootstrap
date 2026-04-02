@@ -1,20 +1,22 @@
 ﻿param(
     [string]$Distro = "Ubuntu",
     [switch]$SkipAptUpgrade,
+    [switch]$AutoConfirm,
     [switch]$NoAutoLaunchCodex,
     [switch]$SkipHostChecks,
     [string]$BootstrapRef
 )
 
-# Version: 1.0.3
+# Version: 1.0.6
 # Update this version every time this script changes.
-$ScriptVersion = '1.0.3'
+$ScriptVersion = '1.0.6'
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ScriptRoot = Split-Path -Parent $PSCommandPath
 $DefaultSkillsManifestUrl = 'https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
+$DefaultPluginsManifestUrl = 'https://raw.githubusercontent.com/962412311/codex-skills-pack/main/plugins.manifest.json'
 $BootstrapRepoOwner = '962412311'
 $BootstrapRepoName = 'wsl-codex-bootstrap'
 $LinuxInstallerFileName = 'install-linux-codex.sh'
@@ -54,6 +56,9 @@ function Confirm-Yes {
         [string]$Prompt,
         [bool]$DefaultYes = $true
     )
+    if ($AutoConfirm) {
+        return $true
+    }
     $suffix = if ($DefaultYes) { ' [Y/n]' } else { ' [y/N]' }
     $answer = Read-Host "$Prompt$suffix"
     if ([string]::IsNullOrWhiteSpace($answer)) {
@@ -889,13 +894,43 @@ function Install-CodexSkills {
     Write-Ok '已从上游仓库安装 Codex skills。'
 }
 
+function Install-CodexPlugins {
+    param(
+        [string]$TargetDistro,
+        [string]$LinuxUser
+    )
+
+    $tempManifest = New-TemporaryFile
+    try {
+        Invoke-WebRequest -Uri $DefaultPluginsManifestUrl -UseBasicParsing -OutFile $tempManifest.FullName
+        $manifestText = Get-Content -Raw -Path $tempManifest.FullName
+        if ([string]::IsNullOrWhiteSpace($manifestText) -or -not $manifestText.TrimStart().StartsWith('{')) {
+            Write-WarnEx '下载到的 plugins manifest 无效，跳过插件恢复。'
+            return
+        }
+
+        $wslManifestPath = Convert-ToWslPath -WindowsPath $tempManifest.FullName
+        $claudeRoot = "/home/$LinuxUser/.claude"
+        Invoke-LinuxInstaller -TargetDistro $TargetDistro -Command 'install-claude-plugins' -User $LinuxUser -Arguments @($wslManifestPath, $claudeRoot) | Out-Null
+    }
+    catch {
+        Write-WarnEx "未能下载 plugins manifest：$DefaultPluginsManifestUrl，跳过插件恢复。"
+        return
+    }
+    finally {
+        Remove-Item -LiteralPath $tempManifest.FullName -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Ok '已从上游仓库恢复 Claude plugins。'
+}
+
 function Launch-CodexInteractive {
     param(
         [string]$TargetDistro,
         [string]$LinuxUser
     )
 
-    if ($NoAutoLaunchCodex) {
+    if ($NoAutoLaunchCodex -or $AutoConfirm) {
         return
     }
 
@@ -975,9 +1010,10 @@ try {
     Ensure-CodexDefaultModel -TargetDistro $Distro -LinuxUser $linuxUser
     Check-CodexSubscriptionStatus -TargetDistro $Distro -LinuxUser $linuxUser
     Install-CodexSkills -TargetDistro $Distro -LinuxUser $linuxUser
+    Install-CodexPlugins -TargetDistro $Distro -LinuxUser $linuxUser
 
     Write-Section '安装完成'
-    Write-Ok 'WSL、Linux 发行版、基础工具、nvm、Node LTS、Codex 和打包技能已安装。'
+    Write-Ok 'WSL、Linux 发行版、基础工具、nvm、Node LTS、Codex、skills 和 plugins 已安装。'
     Write-Info '尽量把当前项目放在 Linux 文件系统中，例如 `~/code/<project>`。'
     Write-Info '之后可直接使用 `wsl` 进入 WSL。'
     Write-Info '进入 WSL 后运行：`codex`'

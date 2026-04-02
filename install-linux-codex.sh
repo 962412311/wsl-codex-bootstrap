@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Version: 1.0.10
+# Version: 1.0.12
 # Update this version every time this script changes.
 
 log_info() {
@@ -17,7 +17,7 @@ log_warn() {
 }
 
 print_script_version() {
-  printf "[INFO] install-linux-codex.sh version 1.0.10\n" >&2
+  printf "[INFO] install-linux-codex.sh version 1.0.12\n" >&2
 }
 
 ensure_root_home() {
@@ -72,6 +72,7 @@ EOF_WSL_HOME
 }
 
 DEFAULT_SKILLS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json'
+DEFAULT_PLUGINS_MANIFEST_URL='https://raw.githubusercontent.com/962412311/codex-skills-pack/main/plugins.manifest.json'
 
 get_codex_target_triple() {
   case "$(uname -m)" in
@@ -707,6 +708,244 @@ for skill in skills:
 ok(f'已刷新 {installed_count} 个 skills。')
 PY
 }
+
+install_claude_plugins_from_manifest() {
+  ensure_root_home
+
+  local manifest_path="$1"
+  local claude_root="$2"
+  local plugins_sync_root="$HOME/.codex/.tmp/plugin-sync"
+
+  mkdir -p "$plugins_sync_root" "$claude_root/plugins"
+  python3 - "$manifest_path" "$claude_root" "$plugins_sync_root" <<'PY'
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+claude_root = Path(sys.argv[2])
+sync_root = Path(sys.argv[3])
+plugins_root = claude_root / 'plugins'
+marketplaces_root = plugins_root / 'marketplaces'
+cache_root = plugins_root / 'cache'
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+def wsl_to_windows_path(path: Path) -> str:
+    text = str(path)
+    match = re.match(r'^/mnt/([a-zA-Z])/(.*)$', text)
+    if match:
+      drive = match.group(1).upper()
+      tail = match.group(2).replace('/', '\\')
+      return f'{drive}:\\{tail}'
+    return text
+
+def run(cmd, cwd=None):
+    subprocess.run(cmd, check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def is_hex_version(version):
+    return bool(version) and re.fullmatch(r'[0-9a-fA-F]{7,40}', str(version)) is not None
+
+def clone_repo(repo, dest, version=None, commit=None):
+    if dest.exists() and (dest / '.git').exists():
+        try:
+            run(['git', '-C', str(dest), 'pull', '--ff-only', '--quiet'])
+            return
+        except subprocess.CalledProcessError as exc:
+            warn(f'更新现有仓库失败，准备重建：{dest}（{exc}）')
+            shutil.rmtree(dest)
+    elif dest.exists():
+        shutil.rmtree(dest)
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    cmd = ['git', 'clone']
+    version_text = str(version or '')
+    if version_text and version_text != 'unknown' and not is_hex_version(version_text):
+        cmd.extend(['--depth', '1', '--branch', version_text, '--single-branch'])
+    else:
+        cmd.extend(['--depth', '1'])
+    cmd.extend([repo, str(dest)])
+    try:
+        run(cmd)
+    except subprocess.CalledProcessError as exc:
+        warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
+        return False
+
+    commit_text = str(commit or '')
+    if commit_text and is_hex_version(commit_text):
+        try:
+            run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
+        except subprocess.CalledProcessError as exc:
+            warn(f'检出指定提交失败：{dest} @ {commit_text}（{exc}）')
+    return True
+
+def home_path(relative_path):
+    text = str(relative_path).strip()
+    if text.startswith('~'):
+        text = text[1:]
+    text = text.lstrip('/\\')
+    return Path.home() / text
+
+def remove_path(path):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    if path.exists():
+        shutil.rmtree(path)
+
+def ensure_symlink(source, target, is_dir=False):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() or target.is_symlink():
+        remove_path(target)
+    os.symlink(source, target, target_is_directory=is_dir)
+
+def copy_tree(source, destination):
+    if destination.exists():
+        remove_path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if source.is_dir():
+        shutil.copytree(source, destination, symlinks=True, ignore=shutil.ignore_patterns('.git'))
+    else:
+        shutil.copy2(source, destination)
+
+if not manifest_path.exists():
+    print('plugins manifest 不存在，跳过插件恢复。')
+    sys.exit(0)
+
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('plugins manifest 为空，跳过插件恢复。')
+    sys.exit(0)
+
+try:
+    manifest = json.loads(manifest_text)
+except Exception as exc:
+    print(f'无法读取 plugins manifest：{exc}')
+    sys.exit(0)
+
+marketplaces = manifest.get('marketplaces', [])
+plugins = manifest.get('plugins', [])
+if not marketplaces or not plugins:
+    warn('plugins manifest 中没有可恢复的 marketplace 或 plugin。')
+    sys.exit(0)
+
+now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+marketplace_state = {}
+for marketplace in marketplaces:
+    marketplace_id = marketplace.get('id')
+    repo = marketplace.get('repo')
+    if not marketplace_id or not repo:
+        warn('忽略一个缺少 id 或 repo 的 marketplace 条目。')
+        continue
+
+    dest_dir = marketplaces_root / marketplace_id
+    clone_repo(repo, dest_dir, marketplace.get('version'))
+    marketplace_state[marketplace_id] = {
+        'source': {
+            'source': marketplace.get('source', 'github'),
+            'repo': repo,
+        },
+        'installLocation': wsl_to_windows_path(dest_dir),
+        'lastUpdated': marketplace.get('lastUpdated', now_iso),
+    }
+    ok(f'已同步 marketplace：{marketplace_id}。')
+
+installed_plugins = {}
+for plugin in plugins:
+    plugin_id = plugin.get('pluginId')
+    marketplace_id = plugin.get('marketplaceId')
+    source_repo = plugin.get('sourceRepo')
+    install_path = plugin.get('installPath')
+    version = plugin.get('version')
+    restore = plugin.get('restore') or {}
+    restore_kind = restore.get('kind', 'marketplace-plugin')
+    if not plugin_id or not marketplace_id or not source_repo:
+        warn('忽略一个缺少 pluginId、marketplaceId 或 sourceRepo 的 plugin 条目。')
+        continue
+
+    plugin_name = plugin_id.split('@', 1)[0]
+    if restore_kind == 'codex-skill-package':
+        install_root = home_path(restore.get('installRoot') or f'.codex/{plugin_name}')
+        clone_repo(source_repo, install_root, version, plugin.get('gitCommitSha'))
+
+        for link in restore.get('links', []):
+            source_rel = link.get('source')
+            target_rel = link.get('target')
+            if not source_rel or not target_rel:
+                warn(f'忽略一个缺少 source 或 target 的链接：{plugin_id}。')
+                continue
+            source_path = install_root / source_rel
+            target_path = home_path(target_rel)
+            if not source_path.exists():
+                warn(f'跳过链接，源路径不存在：{source_path}。')
+                continue
+            ensure_symlink(source_path, target_path, link.get('type') == 'dir')
+
+        installed_plugins.setdefault(plugin_id, []).append({
+            'scope': 'user',
+            'installPath': str(install_root),
+            'version': version,
+            'installedAt': plugin.get('installedAt', now_iso),
+            'lastUpdated': plugin.get('lastUpdated', now_iso),
+            **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+        })
+        ok(f'已恢复本地 plugin 包：{plugin_name}。')
+        continue
+
+    source_path = restore.get('sourcePath', '.')
+    if not install_path:
+        warn(f'忽略一个缺少 installPath 的 marketplace plugin 条目：{plugin_id}。')
+        continue
+
+    checkout_dir = sync_root / marketplace_id / plugin_name
+    if checkout_dir.exists():
+        shutil.rmtree(checkout_dir)
+    clone_repo(source_repo, checkout_dir, version, plugin.get('gitCommitSha'))
+
+    cache_dir = claude_root / install_path
+    source_dir = checkout_dir / source_path
+    if not source_dir.exists():
+        warn(f'跳过 plugin {plugin_name}：缺少源文件 {source_path}。')
+        continue
+
+    if source_dir.resolve() == checkout_dir.resolve():
+        copy_tree(checkout_dir, cache_dir)
+    else:
+        copy_tree(source_dir, cache_dir)
+
+    installed_plugins.setdefault(plugin_id, []).append({
+        'scope': 'user',
+        'installPath': wsl_to_windows_path(cache_dir),
+        'version': version,
+        'installedAt': plugin.get('installedAt', now_iso),
+        'lastUpdated': plugin.get('lastUpdated', now_iso),
+        **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+    })
+    ok(f'已同步 plugin：{plugin_name}。')
+
+installed_plugins_path = plugins_root / 'installed_plugins.json'
+known_marketplaces_path = plugins_root / 'known_marketplaces.json'
+
+installed_plugins_path.write_text(json.dumps({'version': 2, 'plugins': installed_plugins}, indent=2, ensure_ascii=False) + '\n')
+known_marketplaces_path.write_text(json.dumps(marketplace_state, indent=2, ensure_ascii=False) + '\n')
+
+ok(f'已重建 Claude 插件状态：{len(installed_plugins)} 个 plugins，{len(marketplace_state)} 个 marketplaces。')
+PY
+}
 update_skills() {
   echo "[INFO] 正在检查 skills 更新。"
   local temp_manifest
@@ -719,6 +958,23 @@ update_skills() {
     fi
   else
     echo "[WARN] 未能下载 skills manifest：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 更新。"
+  fi
+  rm -f "$temp_manifest"
+  return 0
+}
+
+update_plugins_state() {
+  echo "[INFO] 正在检查插件状态恢复。"
+  local temp_manifest
+  temp_manifest="$(mktemp)"
+  if curl -fsSL "$DEFAULT_PLUGINS_MANIFEST_URL" -o "$temp_manifest"; then
+    if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
+      install_claude_plugins_from_manifest "$temp_manifest" "$HOME/.claude"
+    else
+      echo "[WARN] 下载到的 plugins manifest 无效：$DEFAULT_PLUGINS_MANIFEST_URL，跳过插件恢复。"
+    fi
+  else
+    echo "[WARN] 未能下载 plugins manifest：$DEFAULT_PLUGINS_MANIFEST_URL，跳过插件恢复。"
   fi
   rm -f "$temp_manifest"
   return 0
@@ -883,6 +1139,7 @@ sync_update_artifacts() {
   if should_check_update; then
     update_codex
     update_plugins
+    update_plugins_state
     update_skills
     touch_update_stamp
   fi
@@ -1341,6 +1598,18 @@ bootstrap() {
   fi
   rm -f "$temp_manifest"
 
+  temp_manifest="$(mktemp)"
+  if curl -fsSL "$DEFAULT_PLUGINS_MANIFEST_URL" -o "$temp_manifest"; then
+    if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
+      install_claude_plugins_from_manifest "$temp_manifest" "$HOME/.claude"
+    else
+      log_warn "下载到的 plugins manifest 无效：$DEFAULT_PLUGINS_MANIFEST_URL，跳过插件恢复。"
+    fi
+  else
+    log_warn "未能下载 plugins manifest：$DEFAULT_PLUGINS_MANIFEST_URL，跳过插件恢复。"
+  fi
+  rm -f "$temp_manifest"
+
   log_ok 'WSL 侧 Codex 已完成安装。'
   log_info '进入 WSL 后运行：codex'
 }
@@ -1373,6 +1642,9 @@ main() {
       ;;
     install-skills)
       install_skills_from_manifest "${2:?missing manifest path}"
+      ;;
+    install-claude-plugins)
+      install_claude_plugins_from_manifest "${2:?missing manifest path}" "${3:?missing claude root path}"
       ;;
     bootstrap)
       bootstrap "${2:-0}"

@@ -3,9 +3,9 @@
     [object[]]$ForwardArgs
 )
 
-# Version: 1.0.2
+# Version: 1.0.4
 # Update this version every time this script changes.
-$ScriptVersion = '1.0.2'
+$ScriptVersion = '1.0.4'
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -30,7 +30,7 @@ try {
         $installerArgs += $ForwardArgs
     }
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tempScript -BootstrapRef $bootstrapRef @installerArgs
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tempScript -BootstrapRef $bootstrapRef -AutoConfirm -NoAutoLaunchCodex @installerArgs
 
     exit $LASTEXITCODE
 }

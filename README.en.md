@@ -4,10 +4,10 @@
 
 This repository is the Windows-side bootstrapper for getting a fresh Windows machine ready for Codex.
 
-Run it once and it installs WSL, Codex, and all 32 skills from the upstream skills pack.
+Run it once and it installs WSL, Codex, and all 33 skills from the upstream skills pack.
 
 The script also writes Codex's default model as `gpt-5.4-mini`.
-After installation and before each automatic launch, it first checks whether Codex is already up to date inside WSL, updates only when it is not, and also checks whether the subscription is nearing expiry or already expired; it only warns and does not block. It also refreshes locally installed skills and plugins once per day before launching Codex.
+After installation and before each automatic launch, it first checks whether Codex is already up to date inside WSL, updates only when it is not, and also checks whether the subscription is nearing expiry or already expired; it only warns and does not block. It also refreshes locally installed skills and plugins once per day before launching Codex, and restores the recorded Claude plugin state from the plugin manifest. The online one-click entry now runs unattended by default, so it does not stop for confirmation prompts and it does not auto-create a Linux user; if no regular user exists yet, it opens WSL once so you can create one manually.
 
 It is responsible for:
 
@@ -16,6 +16,7 @@ It is responsible for:
 - installing base packages, `nvm`, Node.js LTS, and `@openai/codex`
 - checking Codex subscription status
 - installing Codex skills from the upstream skills pack
+- restoring Claude plugins from the plugin manifest
 
 ## Quick Start
 
@@ -54,7 +55,7 @@ The first run may prompt for `sudo` when it installs base packages.
 ### Local checkout
 
 1. Clone or download this repository.
-2. The installer always pulls skills from the upstream skills pack.
+2. The installer always pulls skills from the upstream skills pack and restores plugins from the plugin manifest.
 3. Open PowerShell as Administrator.
 4. Run:
 

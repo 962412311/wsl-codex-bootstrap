@@ -4,10 +4,10 @@
 
 这是给新 Windows 机器使用的 Codex 一键引导仓库。
 
-运行一次，就会安装 WSL、Codex，以及上游 skills 包里的全部 32 个 skills。
+运行一次，就会安装 WSL、Codex，以及上游 skills 包里的全部 33 个 skills。
 
 脚本还会把 Codex 默认模型写成 `gpt-5.4-mini`。
-安装完成后和每次自动启动前，脚本都会先检查 Codex 是否已经是最新版本；不是最新版才更新，并且还会检查订阅是否快到期或已到期，只提示，不阻断。它还会在每天首次启动前静默刷新本地 skills 和 plugins。
+安装完成后和每次自动启动前，脚本都会先检查 Codex 是否已经是最新版本；不是最新版才更新，并且还会检查订阅是否快到期或已到期，只提示，不阻断。它还会在每天首次启动前静默刷新本地 skills 和 plugins，并按 manifest 恢复当前已记录的 Claude plugins 状态。在线一键入口默认以无人值守模式运行，不会停在确认问题上，也不会自动创建 Linux 用户；如果检测不到普通用户，只会打开一次 WSL 让你手动创建。
 
 它负责：
 
@@ -16,6 +16,7 @@
 - 安装基础开发工具、`nvm`、Node.js LTS 和 `@openai/codex`
 - 检查 Codex 订阅状态
 - 从上游 skills 包安装 Codex skills
+- 从 plugins manifest 恢复 Claude plugins
 
 ## 快速开始
 
@@ -54,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/
 ### 本地执行
 
 1. 克隆或下载这个仓库。
-2. 安装器始终从上游 skills 包拉取 skills。
+2. 安装器始终从上游 skills 包拉取 skills，并从 plugins manifest 恢复插件状态。
 3. 以管理员身份打开 PowerShell。
 4. 运行：
 

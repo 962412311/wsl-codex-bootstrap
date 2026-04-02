@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Version: 1.0.1
+# Version: 1.0.2
 # Update this version every time this script changes.
 
 log_info() { printf '[INFO] %s\n' "$1"; }
 log_ok() { printf '[OK] %s\n' "$1"; }
 log_warn() { printf '[WARN] %s\n' "$1"; }
 
-log_info "install-mac-codex.sh version 1.0.1"
+log_info "install-mac-codex.sh version 1.0.2"
 
 source_linux_bootstrap() {
-  local script_dir linux_script tmp
+  local script_dir linux_script tmp cleanup
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   linux_script="$script_dir/install-linux-codex.sh"
 
@@ -21,7 +21,8 @@ source_linux_bootstrap() {
   fi
 
   tmp="$(mktemp)"
-  trap 'rm -f "$tmp"' EXIT
+  cleanup="rm -f '$tmp'"
+  trap "$cleanup" EXIT
   /usr/bin/curl -fsSL https://raw.githubusercontent.com/962412311/wsl-codex-bootstrap/main/install-linux-codex.sh -o "$tmp"
   CODEX_BOOTSTRAP_LIB=1 . "$tmp"
 }
@@ -126,7 +127,6 @@ install_base_packages() {
     xz
     moreutils
     python@3.12
-    bubblewrap
   )
 
   ensure_homebrew
