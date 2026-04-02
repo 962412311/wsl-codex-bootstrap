@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Version: 1.0.4
+# Version: 1.0.5
 # Update this version every time this script changes.
 
 log_info() { printf '[INFO] %s\n' "$1"; }
 log_ok() { printf '[OK] %s\n' "$1"; }
 log_warn() { printf '[WARN] %s\n' "$1"; }
 
-log_info "install-mac-codex.sh version 1.0.4"
+log_info "install-mac-codex.sh version 1.0.5"
 
 source_linux_bootstrap() {
   local script_dir script_source linux_script tmp cleanup
