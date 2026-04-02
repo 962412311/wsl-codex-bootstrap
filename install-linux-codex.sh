@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Version: 1.0.12
+# Version: 1.0.15
 # Update this version every time this script changes.
 
 log_info() {
@@ -17,7 +17,7 @@ log_warn() {
 }
 
 print_script_version() {
-  printf "[INFO] install-linux-codex.sh version 1.0.12\n" >&2
+  printf "[INFO] install-linux-codex.sh version 1.0.15\n" >&2
 }
 
 ensure_root_home() {
@@ -294,6 +294,84 @@ install_base_packages() {
   "${apt_get[@]}" clean
 }
 
+version_is_older() {
+  python3 - "$1" "$2" <<'PY'
+import re
+import sys
+
+def parts(value):
+    cleaned = value.strip().lstrip('v').split('-', 1)[0]
+    return [int(item) for item in re.findall(r'\d+', cleaned)]
+
+current = parts(sys.argv[1])
+latest = parts(sys.argv[2])
+
+for current_part, latest_part in zip(current, latest):
+    if current_part < latest_part:
+        sys.exit(0)
+    if current_part > latest_part:
+        sys.exit(1)
+
+sys.exit(0 if len(current) < len(latest) else 1)
+PY
+}
+
+get_latest_node_lts_version() {
+  if command -v nvm >/dev/null 2>&1; then
+    nvm ls-remote --lts 2>/dev/null | awk '/^[[:space:]]*v[0-9]/ { version = $1 } END { gsub(/^v/, "", version); print version }'
+  fi
+}
+
+ensure_latest_node_runtime() {
+  local current_node_version latest_node_version
+
+  current_node_version="$(node -v 2>/dev/null | sed 's/^v//')"
+  latest_node_version="$(get_latest_node_lts_version)"
+
+  if [ -z "$latest_node_version" ]; then
+    log_warn 'Unable to determine latest Node.js LTS version; skipping check.'
+    return 0
+  fi
+
+  if [ -z "$current_node_version" ]; then
+    log_info "Node.js not found; latest LTS is $latest_node_version."
+    return 1
+  fi
+
+  if version_is_older "$current_node_version" "$latest_node_version"; then
+    log_info "Node.js update available: $current_node_version -> $latest_node_version."
+    return 1
+  fi
+
+  log_info "Node.js is already up to date: $current_node_version."
+  return 0
+}
+
+ensure_latest_npm() {
+  local current_npm_version latest_npm_version
+
+  current_npm_version="$(npm -v 2>/dev/null || true)"
+  latest_npm_version="$(npm view npm version --silent 2>/dev/null || true)"
+
+  if [ -z "$latest_npm_version" ]; then
+    log_warn 'Unable to determine latest npm version; skipping check.'
+    return 0
+  fi
+
+  if [ -z "$current_npm_version" ]; then
+    log_info "npm not found; latest version is $latest_npm_version."
+    return 1
+  fi
+
+  if version_is_older "$current_npm_version" "$latest_npm_version"; then
+    log_info "npm update available: $current_npm_version -> $latest_npm_version."
+    return 1
+  fi
+
+  log_info "npm is already up to date: $current_npm_version."
+  return 0
+}
+
 install_node_codex() {
   ensure_root_home
 
@@ -317,10 +395,20 @@ install_node_codex() {
   export NVM_DIR="$HOME/.nvm"
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
-  nvm install --lts
-  nvm alias default 'lts/*'
-  nvm use --lts
+  if ensure_latest_node_runtime; then
+    :
+  else
+    nvm install --lts
+    nvm alias default 'lts/*'
+    nvm use --lts
+  fi
   set -u
+
+  if ensure_latest_npm; then
+    :
+  else
+    npm install -g npm@latest
+  fi
 
   npm i -g --prefix "$codex_prefix" @openai/codex@latest
   local codex_bin="$codex_prefix/bin/codex"
@@ -769,21 +857,303 @@ def clone_repo(repo, dest, version=None, commit=None):
     elif dest.exists():
         shutil.rmtree(dest)
 
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    cmd = ['git', 'clone']
     version_text = str(version or '')
-    if version_text and version_text != 'unknown' and not is_hex_version(version_text):
-        cmd.extend(['--depth', '1', '--branch', version_text, '--single-branch'])
-    else:
-        cmd.extend(['--depth', '1'])
-    cmd.extend([repo, str(dest)])
-    try:
-        run(cmd)
-    except subprocess.CalledProcessError as exc:
-        warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
-        return False
-
     commit_text = str(commit or '')
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    cloned = False
+    ref_candidates = []
+    if version_text and version_text != 'unknown' and not is_hex_version(version_text):
+        ref_candidates.append(version_text)
+        if version_text.startswith('v'):
+            stripped_version = version_text[1:]
+            if stripped_version and stripped_version not in ref_candidates:
+                ref_candidates.append(stripped_version)
+        else:
+            prefixed_version = f'v{version_text}'
+            if prefixed_version not in ref_candidates:
+                ref_candidates.append(prefixed_version)
+
+    for ref in ref_candidates:
+        cmd = ['git', 'clone', '--depth', '1', '--branch', ref, '--single-branch', repo, str(dest)]
+        try:
+            run(cmd)
+            cloned = True
+            break
+        except subprocess.CalledProcessError:
+            if dest.exists():
+                shutil.rmtree(dest)
+
+    if not cloned:
+        cmd = ['git', 'clone', '--depth', '1', repo, str(dest)]
+        try:
+            run(cmd)
+            cloned = True
+        except subprocess.CalledProcessError as exc:
+            warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
+            return False
+
+    if commit_text and is_hex_version(commit_text):
+        try:
+            run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
+        except subprocess.CalledProcessError as exc:
+            warn(f'检出指定提交失败：{dest} @ {commit_text}（{exc}）')
+    return True
+
+def home_path(relative_path):
+    text = str(relative_path).strip()
+    if text.startswith('~'):
+        text = text[1:]
+    text = text.lstrip('/\\')
+    return Path.home() / text
+
+def remove_path(path):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    if path.exists():
+        shutil.rmtree(path)
+
+def ensure_symlink(source, target, is_dir=False):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() or target.is_symlink():
+        remove_path(target)
+    os.symlink(source, target, target_is_directory=is_dir)
+
+def copy_tree(source, destination):
+    if destination.exists():
+        remove_path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if source.is_dir():
+        shutil.copytree(source, destination, symlinks=True, ignore=shutil.ignore_patterns('.git'))
+    else:
+        shutil.copy2(source, destination)
+
+if not manifest_path.exists():
+    print('plugins manifest 不存在，跳过插件恢复。')
+    sys.exit(0)
+
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('plugins manifest 为空，跳过插件恢复。')
+    sys.exit(0)
+
+try:
+    manifest = json.loads(manifest_text)
+except Exception as exc:
+    print(f'无法读取 plugins manifest：{exc}')
+    sys.exit(0)
+
+marketplaces = manifest.get('marketplaces', [])
+plugins = manifest.get('plugins', [])
+if not marketplaces or not plugins:
+    warn('plugins manifest 中没有可恢复的 marketplace 或 plugin。')
+    sys.exit(0)
+
+now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+marketplace_state = {}
+for marketplace in marketplaces:
+    marketplace_id = marketplace.get('id')
+    repo = marketplace.get('repo')
+    if not marketplace_id or not repo:
+        warn('忽略一个缺少 id 或 repo 的 marketplace 条目。')
+        continue
+
+    dest_dir = marketplaces_root / marketplace_id
+    clone_repo(repo, dest_dir, marketplace.get('version'))
+    marketplace_state[marketplace_id] = {
+        'source': {
+            'source': marketplace.get('source', 'github'),
+            'repo': repo,
+        },
+        'installLocation': wsl_to_windows_path(dest_dir),
+        'lastUpdated': marketplace.get('lastUpdated', now_iso),
+    }
+    ok(f'已同步 marketplace：{marketplace_id}。')
+
+installed_plugins = {}
+for plugin in plugins:
+    plugin_id = plugin.get('pluginId')
+    marketplace_id = plugin.get('marketplaceId')
+    source_repo = plugin.get('sourceRepo')
+    install_path = plugin.get('installPath')
+    version = plugin.get('version')
+    restore = plugin.get('restore') or {}
+    restore_kind = restore.get('kind', 'marketplace-plugin')
+    if not plugin_id or not marketplace_id or not source_repo:
+        warn('忽略一个缺少 pluginId、marketplaceId 或 sourceRepo 的 plugin 条目。')
+        continue
+
+    plugin_name = plugin_id.split('@', 1)[0]
+    if restore_kind == 'codex-skill-package':
+        install_root = home_path(restore.get('installRoot') or f'.codex/{plugin_name}')
+        clone_repo(source_repo, install_root, version, plugin.get('gitCommitSha'))
+
+        for link in restore.get('links', []):
+            source_rel = link.get('source')
+            target_rel = link.get('target')
+            if not source_rel or not target_rel:
+                warn(f'忽略一个缺少 source 或 target 的链接：{plugin_id}。')
+                continue
+            source_path = install_root / source_rel
+            target_path = home_path(target_rel)
+            if not source_path.exists():
+                warn(f'跳过链接，源路径不存在：{source_path}。')
+                continue
+            ensure_symlink(source_path, target_path, link.get('type') == 'dir')
+
+        installed_plugins.setdefault(plugin_id, []).append({
+            'scope': 'user',
+            'installPath': str(install_root),
+            'version': version,
+            'installedAt': plugin.get('installedAt', now_iso),
+            'lastUpdated': plugin.get('lastUpdated', now_iso),
+            **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+        })
+        ok(f'已恢复本地 plugin 包：{plugin_name}。')
+        continue
+
+    source_path = restore.get('sourcePath', '.')
+    if not install_path:
+        warn(f'忽略一个缺少 installPath 的 marketplace plugin 条目：{plugin_id}。')
+        continue
+
+    checkout_dir = sync_root / marketplace_id / plugin_name
+    if checkout_dir.exists():
+        shutil.rmtree(checkout_dir)
+    clone_repo(source_repo, checkout_dir, version, plugin.get('gitCommitSha'))
+
+    cache_dir = claude_root / install_path
+    source_dir = checkout_dir / source_path
+    if not source_dir.exists():
+        warn(f'跳过 plugin {plugin_name}：缺少源文件 {source_path}。')
+        continue
+
+    if source_dir.resolve() == checkout_dir.resolve():
+        copy_tree(checkout_dir, cache_dir)
+    else:
+        copy_tree(source_dir, cache_dir)
+
+    installed_plugins.setdefault(plugin_id, []).append({
+        'scope': 'user',
+        'installPath': wsl_to_windows_path(cache_dir),
+        'version': version,
+        'installedAt': plugin.get('installedAt', now_iso),
+        'lastUpdated': plugin.get('lastUpdated', now_iso),
+        **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+    })
+    ok(f'已同步 plugin：{plugin_name}。')
+
+installed_plugins_path = plugins_root / 'installed_plugins.json'
+known_marketplaces_path = plugins_root / 'known_marketplaces.json'
+
+installed_plugins_path.write_text(json.dumps({'version': 2, 'plugins': installed_plugins}, indent=2, ensure_ascii=False) + '\n')
+known_marketplaces_path.write_text(json.dumps(marketplace_state, indent=2, ensure_ascii=False) + '\n')
+
+ok(f'已重建 Claude 插件状态：{len(installed_plugins)} 个 plugins，{len(marketplace_state)} 个 marketplaces。')
+PY
+}
+
+install_claude_plugins_from_manifest() {
+  ensure_root_home
+
+  local manifest_path="$1"
+  local claude_root="$2"
+  local plugins_sync_root="$HOME/.codex/.tmp/plugin-sync"
+
+  mkdir -p "$plugins_sync_root" "$claude_root/plugins"
+  python3 - "$manifest_path" "$claude_root" "$plugins_sync_root" <<'PY'
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+claude_root = Path(sys.argv[2])
+sync_root = Path(sys.argv[3])
+plugins_root = claude_root / 'plugins'
+marketplaces_root = plugins_root / 'marketplaces'
+cache_root = plugins_root / 'cache'
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+def wsl_to_windows_path(path: Path) -> str:
+    text = str(path)
+    match = re.match(r'^/mnt/([a-zA-Z])/(.*)$', text)
+    if match:
+      drive = match.group(1).upper()
+      tail = match.group(2).replace('/', '\\')
+      return f'{drive}:\\{tail}'
+    return text
+
+def run(cmd, cwd=None):
+    subprocess.run(cmd, check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def is_hex_version(version):
+    return bool(version) and re.fullmatch(r'[0-9a-fA-F]{7,40}', str(version)) is not None
+
+def clone_repo(repo, dest, version=None, commit=None):
+    if dest.exists() and (dest / '.git').exists():
+        try:
+            run(['git', '-C', str(dest), 'pull', '--ff-only', '--quiet'])
+            return
+        except subprocess.CalledProcessError as exc:
+            warn(f'更新现有仓库失败，准备重建：{dest}（{exc}）')
+            shutil.rmtree(dest)
+    elif dest.exists():
+        shutil.rmtree(dest)
+
+    version_text = str(version or '')
+    commit_text = str(commit or '')
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    cloned = False
+    ref_candidates = []
+    if version_text and version_text != 'unknown' and not is_hex_version(version_text):
+        ref_candidates.append(version_text)
+        if version_text.startswith('v'):
+            stripped_version = version_text[1:]
+            if stripped_version and stripped_version not in ref_candidates:
+                ref_candidates.append(stripped_version)
+        else:
+            prefixed_version = f'v{version_text}'
+            if prefixed_version not in ref_candidates:
+                ref_candidates.append(prefixed_version)
+
+    for ref in ref_candidates:
+        cmd = ['git', 'clone', '--depth', '1', '--branch', ref, '--single-branch', repo, str(dest)]
+        try:
+            run(cmd)
+            cloned = True
+            break
+        except subprocess.CalledProcessError:
+            if dest.exists():
+                shutil.rmtree(dest)
+
+    if not cloned:
+        cmd = ['git', 'clone', '--depth', '1', repo, str(dest)]
+        try:
+            run(cmd)
+            cloned = True
+        except subprocess.CalledProcessError as exc:
+            warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
+            return False
+
     if commit_text and is_hex_version(commit_text):
         try:
             run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
@@ -1339,6 +1709,263 @@ for skill in skills:
     installed_count += 1
     ok(f'已安装 skill：{skill["name"]}。')
 ok(f'已刷新 {installed_count} 个 skills。')
+PY
+}
+
+install_claude_plugins_from_manifest() {
+  ensure_root_home
+
+  local manifest_path="$1"
+  local claude_root="$2"
+  local plugins_sync_root="$HOME/.codex/.tmp/plugin-sync"
+
+  mkdir -p "$plugins_sync_root" "$claude_root/plugins"
+  python3 - "$manifest_path" "$claude_root" "$plugins_sync_root" <<'PY'
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+claude_root = Path(sys.argv[2])
+sync_root = Path(sys.argv[3])
+plugins_root = claude_root / 'plugins'
+marketplaces_root = plugins_root / 'marketplaces'
+cache_root = plugins_root / 'cache'
+
+def info(message):
+    print(f'[INFO] {message}')
+
+def ok(message):
+    print(f'[OK] {message}')
+
+def warn(message):
+    print(f'[WARN] {message}')
+
+def wsl_to_windows_path(path: Path) -> str:
+    text = str(path)
+    match = re.match(r'^/mnt/([a-zA-Z])/(.*)$', text)
+    if match:
+        drive = match.group(1).upper()
+        tail = match.group(2).replace('/', '\\')
+        return f'{drive}:\\{tail}'
+    return text
+
+def run(cmd, cwd=None):
+    subprocess.run(cmd, check=True, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def is_hex_version(version):
+    return bool(version) and re.fullmatch(r'[0-9a-fA-F]{7,40}', str(version)) is not None
+
+def clone_repo(repo, dest, version=None, commit=None):
+    if dest.exists() and (dest / '.git').exists():
+        try:
+            run(['git', '-C', str(dest), 'pull', '--ff-only', '--quiet'])
+            return
+        except subprocess.CalledProcessError as exc:
+            warn(f'更新现有仓库失败，准备重建：{dest}（{exc}）')
+            shutil.rmtree(dest)
+    elif dest.exists():
+        shutil.rmtree(dest)
+
+    version_text = str(version or '')
+    commit_text = str(commit or '')
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    cloned = False
+    ref_candidates = []
+    if version_text and version_text != 'unknown' and not is_hex_version(version_text):
+        ref_candidates.append(version_text)
+        if version_text.startswith('v'):
+            stripped_version = version_text[1:]
+            if stripped_version and stripped_version not in ref_candidates:
+                ref_candidates.append(stripped_version)
+        else:
+            prefixed_version = f'v{version_text}'
+            if prefixed_version not in ref_candidates:
+                ref_candidates.append(prefixed_version)
+
+    for ref in ref_candidates:
+        cmd = ['git', 'clone', '--depth', '1', '--branch', ref, '--single-branch', repo, str(dest)]
+        try:
+            run(cmd)
+            cloned = True
+            break
+        except subprocess.CalledProcessError:
+            if dest.exists():
+                shutil.rmtree(dest)
+
+    if not cloned:
+        cmd = ['git', 'clone', '--depth', '1', repo, str(dest)]
+        try:
+            run(cmd)
+            cloned = True
+        except subprocess.CalledProcessError as exc:
+            warn(f'克隆仓库失败：{repo} -> {dest}（{exc}）')
+            return False
+    if commit_text and is_hex_version(commit_text):
+        try:
+            run(['git', '-C', str(dest), 'checkout', '--quiet', commit_text])
+        except subprocess.CalledProcessError as exc:
+            warn(f'检出指定提交失败：{dest} @ {commit_text}（{exc}）')
+    return True
+
+def home_path(relative_path):
+    text = str(relative_path).strip()
+    if text.startswith('~'):
+        text = text[1:]
+    text = text.lstrip('/\\')
+    return Path.home() / text
+
+def remove_path(path):
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    if path.exists():
+        shutil.rmtree(path)
+
+def ensure_symlink(source, target, is_dir=False):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() or target.is_symlink():
+        remove_path(target)
+    os.symlink(source, target, target_is_directory=is_dir)
+
+def copy_tree(source, destination):
+    if destination.exists():
+        remove_path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if source.is_dir():
+        shutil.copytree(source, destination, symlinks=True, ignore=shutil.ignore_patterns('.git'))
+    else:
+        shutil.copy2(source, destination)
+
+if not manifest_path.exists():
+    print('plugins manifest 不存在，跳过插件恢复。')
+    sys.exit(0)
+
+manifest_text = manifest_path.read_text().strip()
+if not manifest_text:
+    print('plugins manifest 为空，跳过插件恢复。')
+    sys.exit(0)
+
+try:
+    manifest = json.loads(manifest_text)
+except Exception as exc:
+    print(f'无法读取 plugins manifest：{exc}')
+    sys.exit(0)
+
+marketplaces = manifest.get('marketplaces', [])
+plugins = manifest.get('plugins', [])
+if not marketplaces or not plugins:
+    warn('plugins manifest 中没有可恢复的 marketplace 或 plugin。')
+    sys.exit(0)
+
+now_iso = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+marketplace_state = {}
+for marketplace in marketplaces:
+    marketplace_id = marketplace.get('id')
+    repo = marketplace.get('repo')
+    if not marketplace_id or not repo:
+        warn('忽略一个缺少 id 或 repo 的 marketplace 条目。')
+        continue
+
+    dest_dir = marketplaces_root / marketplace_id
+    clone_repo(repo, dest_dir, marketplace.get('version'))
+    marketplace_state[marketplace_id] = {
+        'source': {
+            'source': marketplace.get('source', 'github'),
+            'repo': repo,
+        },
+        'installLocation': wsl_to_windows_path(dest_dir),
+        'lastUpdated': marketplace.get('lastUpdated', now_iso),
+    }
+    ok(f'已同步 marketplace：{marketplace_id}。')
+
+installed_plugins = {}
+for plugin in plugins:
+    plugin_id = plugin.get('pluginId')
+    marketplace_id = plugin.get('marketplaceId')
+    source_repo = plugin.get('sourceRepo')
+    install_path = plugin.get('installPath')
+    version = plugin.get('version')
+    restore = plugin.get('restore') or {}
+    restore_kind = restore.get('kind', 'marketplace-plugin')
+    if not plugin_id or not marketplace_id or not source_repo:
+        warn('忽略一个缺少 pluginId、marketplaceId 或 sourceRepo 的 plugin 条目。')
+        continue
+
+    plugin_name = plugin_id.split('@', 1)[0]
+    if restore_kind == 'codex-skill-package':
+        install_root = home_path(restore.get('installRoot') or f'.codex/{plugin_name}')
+        clone_repo(source_repo, install_root, version, plugin.get('gitCommitSha'))
+
+        for link in restore.get('links', []):
+            source_rel = link.get('source')
+            target_rel = link.get('target')
+            if not source_rel or not target_rel:
+                warn(f'忽略一个缺少 source 或 target 的链接：{plugin_id}。')
+                continue
+            source_path = install_root / source_rel
+            target_path = home_path(target_rel)
+            if not source_path.exists():
+                warn(f'跳过链接，源路径不存在：{source_path}。')
+                continue
+            ensure_symlink(source_path, target_path, link.get('type') == 'dir')
+
+        installed_plugins.setdefault(plugin_id, []).append({
+            'scope': 'user',
+            'installPath': str(install_root),
+            'version': version,
+            'installedAt': plugin.get('installedAt', now_iso),
+            'lastUpdated': plugin.get('lastUpdated', now_iso),
+            **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+        })
+        ok(f'已恢复本地 plugin 包：{plugin_name}。')
+        continue
+
+    source_path = restore.get('sourcePath', '.')
+    if not install_path:
+        warn(f'忽略一个缺少 installPath 的 marketplace plugin 条目：{plugin_id}。')
+        continue
+
+    checkout_dir = sync_root / marketplace_id / plugin_name
+    if checkout_dir.exists():
+        shutil.rmtree(checkout_dir)
+    clone_repo(source_repo, checkout_dir, version, plugin.get('gitCommitSha'))
+
+    cache_dir = claude_root / install_path
+    source_dir = checkout_dir / source_path
+    if not source_dir.exists():
+        warn(f'跳过 plugin {plugin_name}：缺少源文件 {source_path}。')
+        continue
+
+    if source_dir.resolve() == checkout_dir.resolve():
+        copy_tree(checkout_dir, cache_dir)
+    else:
+        copy_tree(source_dir, cache_dir)
+
+    installed_plugins.setdefault(plugin_id, []).append({
+        'scope': 'user',
+        'installPath': wsl_to_windows_path(cache_dir),
+        'version': version,
+        'installedAt': plugin.get('installedAt', now_iso),
+        'lastUpdated': plugin.get('lastUpdated', now_iso),
+        **({'gitCommitSha': plugin['gitCommitSha']} if plugin.get('gitCommitSha') else {}),
+    })
+    ok(f'已同步 plugin：{plugin_name}。')
+
+installed_plugins_path = plugins_root / 'installed_plugins.json'
+known_marketplaces_path = plugins_root / 'known_marketplaces.json'
+
+installed_plugins_path.write_text(json.dumps({'version': 2, 'plugins': installed_plugins}, indent=2, ensure_ascii=False) + '\n')
+known_marketplaces_path.write_text(json.dumps(marketplace_state, indent=2, ensure_ascii=False) + '\n')
+
+ok(f'已重建 Claude 插件状态：{len(installed_plugins)} 个 plugins，{len(marketplace_state)} 个 marketplaces。')
 PY
 }
 
