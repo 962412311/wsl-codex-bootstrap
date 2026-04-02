@@ -1203,6 +1203,8 @@ bootstrap() {
   local skip_upgrade="${1:-0}"
   local temp_manifest
   local subscription_json
+  local skills_manifest_url="${DEFAULT_SKILLS_MANIFEST_URL:-https://raw.githubusercontent.com/962412311/codex-skills-pack/main/skills.manifest.json}"
+  local plugins_manifest_url="${DEFAULT_PLUGINS_MANIFEST_URL:-https://raw.githubusercontent.com/962412311/codex-skills-pack/main/plugins.manifest.json}"
 
   install_base_packages "$skip_upgrade"
   install_node_codex
@@ -1213,26 +1215,26 @@ bootstrap() {
   print_subscription_summary "$subscription_json"
 
   temp_manifest="$(mktemp)"
-  if curl -fsSL "$DEFAULT_SKILLS_MANIFEST_URL" -o "$temp_manifest"; then
+  if curl -fsSL "$skills_manifest_url" -o "$temp_manifest"; then
     if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
       install_skills_from_manifest "$temp_manifest"
     else
-      log_warn "下载到的 skills manifest 无效：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 安装。"
+      log_warn "下载到的 skills manifest 无效：${skills_manifest_url}，跳过 skills 安装。"
     fi
   else
-    log_warn "未能下载 skills manifest：$DEFAULT_SKILLS_MANIFEST_URL，跳过 skills 安装。"
+    log_warn "未能下载 skills manifest：${skills_manifest_url}，跳过 skills 安装。"
   fi
   rm -f "$temp_manifest"
 
   temp_manifest="$(mktemp)"
-  if curl -fsSL "$DEFAULT_PLUGINS_MANIFEST_URL" -o "$temp_manifest"; then
+  if curl -fsSL "$plugins_manifest_url" -o "$temp_manifest"; then
     if [ -s "$temp_manifest" ] && grep -q '^{' "$temp_manifest"; then
       install_claude_plugins_from_manifest "$temp_manifest" "$HOME/.claude"
     else
-      log_warn "下载到的 plugins manifest 无效：$DEFAULT_PLUGINS_MANIFEST_URL，跳过插件恢复。"
+      log_warn "下载到的 plugins manifest 无效：${plugins_manifest_url}，跳过插件恢复。"
     fi
   else
-    log_warn "未能下载 plugins manifest：$DEFAULT_PLUGINS_MANIFEST_URL，跳过插件恢复。"
+    log_warn "未能下载 plugins manifest：${plugins_manifest_url}，跳过插件恢复。"
   fi
   rm -f "$temp_manifest"
 
